@@ -1,0 +1,905 @@
+<!--
+  ZOMBIE SANDBOX — ONLINE (rooms + live sync + chat)
+  ===================================================
+  Flow: Lobby screen (create a room or join by code) -> pick an open
+  player slot -> game screen, same field-log look as the prototype, plus
+  a chat panel for talking to the other real players in the room.
+
+  Everything is driven by one websocket connection per browser tab:
+    server -> client: {type:"state", state}, {type:"chat", entry},
+                       {type:"slot_claimed", slot}, {type:"error", message}
+    client -> server: {type:"claim_slot", slot}, {type:"decision", slot, text},
+                       {type:"chat", slot, text}
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Field Log — Survivor Sandbox Online</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=Spectral:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --canvas:#1c1b17;
+    --paper:#e9e0c7;
+    --paper-edge:#d8cca4;
+    --ink:#2c2620;
+    --ink-soft:#5b5245;
+    --cork:#8a6f4c;
+    --cork-shadow:#5e4a32;
+    --thread-open:#a13a2c;
+    --thread-dormant:#a8823a;
+    --thread-resolved:#5f6f52;
+    --brass:#b89b5e;
+    --taken:#7a7060;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    color:var(--ink);
+    font-family:'Spectral', serif;
+    min-height:100vh;
+    overflow-x:hidden;
+    position:relative;
+    background:
+      linear-gradient(180deg, rgba(6,4,3,0.92), rgba(15,10,8,0.80)),
+      radial-gradient(circle at top left, rgba(255,40,40,0.12), transparent 22%),
+      radial-gradient(circle at bottom right, rgba(120,0,0,0.15), transparent 22%),
+      linear-gradient(135deg, #070503 0%, #1a0f0c 45%, #090705 100%);
+    background-attachment: fixed;
+    background-size: cover;
+  }
+  body::before{
+    content:"";
+    position:fixed;
+    inset:0;
+    pointer-events:none;
+    background:
+      radial-gradient(circle at 15% 18%, rgba(255,0,0,0.14) 0 8%, transparent 12%),
+      radial-gradient(circle at 80% 12%, rgba(255,0,0,0.10) 0 10%, transparent 14%),
+      linear-gradient(180deg, rgba(255,255,255,0.03), transparent 30%);
+    mix-blend-mode:screen;
+  }
+  body::after{
+    content:"";
+    position:fixed;
+    inset:0;
+    pointer-events:none;
+    background-image:radial-gradient(circle, rgba(255,255,255,0.04) 0 1px, transparent 1.8px);
+    background-size:18px 18px;
+    opacity:0.18;
+  }
+  /* Background image applied by user via upload or existing img tag. When present,
+     the script will prepend it to the existing background-image stack so the
+     theme overlays still show. */
+  .with-custom-bg{
+    background-position: center center;
+    background-repeat: no-repeat;
+    background-size: cover;
+    background-attachment: fixed;
+  }
+  .screen, .app{ position:relative; z-index:2; }
+  .screen{ max-width:960px; margin:0 auto; padding:32px 20px; }
+  h1{ font-family:'Special Elite', monospace; color:var(--paper); letter-spacing:1px; text-shadow:2px 2px 0 rgba(0,0,0,0.35); }
+  .card{
+    background:rgba(17,11,8,0.94);
+    border:1px solid rgba(255,100,100,0.16);
+    border-radius:18px;
+    padding:26px;
+    box-shadow:0 24px 60px rgba(0,0,0,0.55);
+    position:relative;
+    overflow:hidden;
+    backdrop-filter: blur(8px);
+  }
+  .card::before{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:radial-gradient(circle at 25% 20%, rgba(255,0,0,0.08), transparent 24%);
+    pointer-events:none;
+  }
+  .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .sidebar{ display:flex; flex-direction:column; gap:16px; }
+  .menu-bar{ display:flex; gap:12px; flex-wrap:wrap; justify-content:center; margin-top:12px; }
+  h2{ margin-top:0; color:#f1e6d0; font-size:1.24rem; }
+  .muted{ color:#c7b99a; font-size:0.9rem; }
+  input[type=text]{
+    font-family:'JetBrains Mono', monospace;
+    padding:12px 14px;
+    border:1px solid rgba(255,255,255,0.12);
+    border-radius:10px;
+    background:rgba(255,255,255,0.12);
+    color:#fff;
+    font-size:1rem;
+    flex:1;
+    min-width:160px;
+  }
+  button{
+    font-family:'JetBrains Mono', monospace;
+    padding:12px 18px;
+    border:none;
+    border-radius:999px;
+    background:linear-gradient(135deg, #9f1f1f, #4a1c12);
+    color:#fff;
+    cursor:pointer;
+    font-size:0.95rem;
+    box-shadow:0 10px 22px rgba(0,0,0,0.38);
+    transition: transform 120ms ease, background 120ms ease, box-shadow 120ms ease;
+  }
+  button:hover{ background:linear-gradient(135deg, #c74040, #6b2418); transform: translateY(-1px); box-shadow:0 14px 26px rgba(0,0,0,0.45); }
+  button:disabled{ background:rgba(80,50,45,0.75); cursor:not-allowed; box-shadow:none; }
+  .muted{ color:var(--ink-soft); font-size:0.9rem; }
+  .slot-list{ display:flex; flex-direction:column; gap:12px; margin-top:18px; }
+  .slot-row{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:14px 16px; background:rgba(31,20,18,0.90); border:1px solid rgba(255,80,80,0.16); border-radius:14px;
+    color:#f3e7d1;
+  }
+  .slot-row button{ border-radius:12px; padding:8px 14px; background:rgba(170,35,35,0.92); }
+  .room-code{
+    font-family:'JetBrains Mono', monospace; font-size:1.4rem; letter-spacing:3px;
+    background:rgba(0,0,0,0.72); border:1px dashed rgba(255,100,100,0.32); padding:10px 16px; border-radius:14px; display:inline-block; color:#ffdcb8;
+  }
+
+  /* ---- game screen ---- */
+  .app{ display:none; max-width:1100px; margin:0 auto; padding:20px; }
+  .title-block{ text-align:center; margin-bottom:18px; padding:18px 14px; background:rgba(12,10,9,0.92); border:1px solid rgba(255,70,70,0.18); border-radius:18px; }
+  .subtitle{ color:#d8cab5; opacity:0.9; font-size:0.9rem; margin-top:8px; }
+  .tabs{ display:flex; gap:8px; justify-content:center; margin:14px 0; }
+  .tab-btn{ background:rgba(33,24,20,0.92); color:#dbcfbe; border:1px solid rgba(255,255,255,0.08); border-radius:999px; padding:10px 18px; }
+  .tab-btn.active{ background:linear-gradient(135deg, #a12323, #5d2113); color:#fff; border-color:rgba(255,90,90,0.24); }
+  .stat-bar{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-bottom:18px; }
+  .stat-chip{ background:rgba(0,0,0,0.75); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:8px 14px; font-family:'JetBrains Mono',monospace; font-size:0.82rem; color:#f2e5cd; }
+  .player-count{ background:var(--paper); border:1px solid var(--paper-edge); border-radius:4px; padding:8px 12px; font-family:'JetBrains Mono',monospace; font-size:0.8rem; margin:0 auto 12px; display:inline-block; }
+  .layout{ display:grid; grid-template-columns:2fr 1fr; gap:16px; }
+  @media (max-width:800px){ .layout{ grid-template-columns:1fr; } }
+  .log-panel, .corkboard, .other-survivors, .chat-panel{
+    background:rgba(12,9,8,0.96); border:1px solid rgba(255,85,85,0.12); border-radius:16px; padding:18px;
+  }
+  .log-scroll{ max-height:360px; overflow-y:auto; margin-bottom:12px; padding-right:4px; }
+  .entry{ margin-bottom:14px; }
+  .entry .role{ font-family:'JetBrains Mono',monospace; font-size:0.7rem; text-transform:uppercase; color:#ad9c8f; margin-bottom:3px; }
+  .entry .bubble{ background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:10px 14px; display:inline-block; color:#f6ebdc; }
+  .entry.system .bubble{ font-style:italic; color:#c4b9a7; font-size:0.85rem; }
+  .composer{ display:flex; gap:8px; }
+  textarea{ flex:1; font-family:'Spectral',serif; padding:12px; border:1px solid rgba(255,255,255,0.10); border-radius:12px; resize:vertical; min-height:46px; background:rgba(255,255,255,0.08); color:#fff; }
+  .loading-line{ font-size:0.8rem; color:var(--ink-soft); margin:6px 0; }
+  .thread-card{ background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); border-left:4px solid var(--thread-open); border-radius:14px; padding:12px 14px; margin-bottom:10px; font-size:0.88rem; color:#f3e7d0; }
+  .thread-card.dormant{ border-left-color:var(--thread-dormant); }
+  .thread-card.resolved{ border-left-color:var(--thread-resolved); opacity:0.78; }
+  .thread-card .tab{ font-family:'JetBrains Mono',monospace; font-size:0.68rem; text-transform:uppercase; color:#c2b5a4; }
+  .thread-empty{ color:var(--ink-soft); font-size:0.85rem; }
+  .history-panel{ background:rgba(12,9,8,0.96); border:1px solid rgba(255,85,85,0.12); border-radius:16px; padding:18px; margin-top:16px; }
+  .history-event{ background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); border-radius:14px; padding:12px 14px; margin-bottom:12px; color:#f3e7d0; }
+  .history-event .meta{ font-family:'JetBrains Mono',monospace; font-size:0.72rem; color:#c7b89f; margin-bottom:6px; text-transform:uppercase; }
+  .history-event .body{ margin-bottom:8px; }
+  .history-event button{ padding:8px 12px; border-radius:10px; font-size:0.8rem; margin-top:4px; }
+  .history-relations{ margin-top:8px; padding-left:10px; border-left:2px solid rgba(255,100,100,0.24); color:#dcc9aa; font-size:0.84rem; }
+  .survivor-card{ background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); border-radius:14px; padding:14px; margin-bottom:12px; color:#f0e7d4; }
+  .survivor-card .name-row{ display:flex; justify-content:space-between; align-items:center; }
+  .survivor-card .meta{ font-size:0.77rem; color:#b8ab9d; margin:6px 0; }
+  .survivor-card .status{ font-size:0.82rem; margin:0; }
+  .chat-panel{ margin-top:16px; }
+  .chat-log{ max-height:180px; overflow-y:auto; margin-bottom:8px; font-size:0.85rem; color:#e9d9c4; }
+  .chat-msg{ margin-bottom:8px; line-height:1.45; }
+  .chat-msg b{ font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:#ffd9a8; }
+  .map-panel{ background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); border-radius:16px; padding:16px; color:#f2e2c8; }
+  .map-grid{ display:grid; grid-template-columns:repeat(10, minmax(16px, 1fr)); gap:2px; margin-bottom:12px; }
+  .map-cell{ width:100%; padding-top:100%; position:relative; border-radius:4px; background:rgba(255,255,255,0.04); overflow:hidden; }
+  .map-cell::after{ content:''; position:absolute; inset:0; }
+  .cell-highway{ background:#8b3d3d; }
+  .cell-road{ background:#7a5f40; }
+  .cell-river{ background:#2f5a8c; }
+  .cell-forest{ background:#24482f; }
+  .cell-hills{ background:#5d5237; }
+  .cell-urban{ background:#5b4f44; }
+  .cell-industrial{ background:#4d3f3a; }
+  .cell-location-known{ box-shadow: inset 0 0 0 2px rgba(255,215,135,0.75); }
+  .cell-location-discovered{ box-shadow: inset 0 0 0 2px rgba(255,130,80,0.9); }
+  .map-cell span{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:0.7rem; color:#fff; }
+  .map-legend{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; font-size:0.82rem; }
+  .legend-item{ display:flex; align-items:center; gap:6px; }
+  .legend-swatch{ width:14px; height:14px; border-radius:3px; display:inline-block; }
+  .legend-swatch.road{background:#7a5f40;}
+  .legend-swatch.river{background:#2f5a8c;}
+  .legend-swatch.forest{background:#24482f;}
+  .legend-swatch.hills{background:#5d5237;}
+  .legend-swatch.urban{background:#5b4f44;}
+  .legend-swatch.industrial{background:#4d3f3a;}
+  .legend-swatch.known{background:#ffdb9f;}
+  .legend-swatch.discovered{background:#ff7f45;}
+  .map-places{ font-size:0.85rem; }
+  .map-place{ margin-bottom:8px; }
+  .map-place span{ display:inline-block; border-radius:10px; padding:2px 8px; background:rgba(255,255,255,0.08); color:#f8e8c5; margin-left:6px; font-size:0.78rem; }
+  .map-hidden{ font-size:0.83rem; color:#c9b59d; }
+  .map-progress{ margin-bottom:12px; padding:10px 12px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); border-radius:10px; color:#f2e2c8; font-size:0.9rem; }
+  .reset-row{ margin-top:10px; }
+  .interaction-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  .interaction-row select{ font-family:'JetBrains Mono',monospace; padding:10px 12px; border:1px solid rgba(255,255,255,0.12); border-radius:12px; background:rgba(255,255,255,0.08); color:#fff; }
+  .save-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:center; margin:12px 0 8px; }
+  .save-status{ color:var(--paper); font-size:0.8rem; opacity:0.75; margin-top:4px; }
+</style>
+</head>
+<body>
+<!-- LOBBY SCREEN -->
+<div class="screen" id="lobbyScreen">
+  <h1>FIELD LOG — SURVIVOR SANDBOX</h1>
+  <div class="card">
+    <h2>Start a new campaign</h2>
+    <button id="createRoomBtn">Create Room</button>
+    <p id="createResult" class="muted"></p>
+
+    <hr style="margin:24px 0; border-color:var(--paper-edge);">
+
+    <h2>Join an existing room</h2>
+    <div class="row">
+      <input type="text" id="joinCodeInput" placeholder="ROOM CODE" maxlength="5" style="text-transform:uppercase;">
+      <button id="joinRoomBtn">Join</button>
+      <button id="loadRoomBtn">Load Saved Room</button>
+    </div>
+    <p id="joinError" class="muted" style="color:#a13a2c;"></p>
+    <p id="loadStatus" class="muted"></p>
+  </div>
+</div>
+<!-- Background uploader: lets you choose an image file that becomes the page background -->
+<div style="max-width:960px;margin:8px auto 0;padding:0 20px;z-index:2;position:relative;">
+  <label style="color:var(--paper);opacity:0.8;font-family:'JetBrains Mono',monospace;font-size:0.9rem;">Upload background image: <input id="bgUpload" type="file" accept="image/*" style="margin-left:8px;"></label>
+</div>
+<!-- NOTE: remove any hidden zombie image usage to keep the UI clean -->
+<!-- <img id="bgImage" src="zombie.svg" style="display:none;"> -->
+<!-- SLOT PICK SCREEN -->
+<div class="screen" id="slotScreen" style="display:none;">
+  <h1>ROOM <span id="roomCodeLabel" class="room-code"></span></h1>
+  <div class="card">
+    <p class="muted">Pick which survivor you're playing. Anyone with the room code above can join as one of the other slots.</p>
+    <div class="player-count" id="slotPlayerCount">TOTAL PLAYERS: 0</div>
+    <div class="slot-list" id="slotList"></div>
+  </div>
+</div>
+
+<!-- GAME SCREEN -->
+<div class="app" id="gameApp">
+  <header class="title-block">
+    <h1 id="titleName">FIELD LOG — PLAYER 1</h1>
+    <div class="subtitle">Room <span id="roomCodeLabel2"></span> · state-tracked · AI-narrated</div>
+    <div class="player-count" id="playerCount">TOTAL PLAYERS: 0</div>
+    <div class="save-row">
+      <button id="saveRoomBtn">Save Room</button>
+      <div class="save-status" id="saveStatus">Not saved yet</div>
+    </div>
+  </header>
+
+  <div class="tabs" id="tabBar"></div>
+  <div class="stat-bar" id="statBar"></div>
+
+  <div class="layout">
+    <div class="log-panel">
+      <div class="log-scroll" id="logScroll"></div>
+      <div class="loading-line" id="loadingLine" style="display:none;">
+        <span>●</span> the station is processing your orders&hellip;
+      </div>
+      <div class="interaction-row">
+        <label for="interactionTargetSelect" class="muted">Interact with</label>
+        <select id="interactionTargetSelect"></select>
+        <button id="interactionBtn">Attempt Interaction</button>
+      </div>
+      <div class="composer">
+        <textarea id="playerInput" placeholder="What do you do? (free text)"></textarea>
+        <button id="sendBtn">Log Decision</button>
+      </div>
+    </div>
+
+    <div class="sidebar">
+      <div class="corkboard">
+        <h2>OPEN THREADS</h2>
+        <div id="threadList"></div>
+      </div>
+      <div class="other-survivors" id="otherSurvivors"></div>
+      <div class="history-panel">
+        <h2>World History</h2>
+        <div id="historyPanel"></div>
+      </div>
+      <div class="map-panel">
+        <h2>Region Map</h2>
+        <div class="map-progress" id="mapProgress"></div>
+        <div class="map-legend">
+          <span class="legend-item"><span class="legend-swatch road"></span> Road</span>
+          <span class="legend-item"><span class="legend-swatch river"></span> River</span>
+          <span class="legend-item"><span class="legend-swatch forest"></span> Forest</span>
+          <span class="legend-item"><span class="legend-swatch hills"></span> Hills</span>
+          <span class="legend-item"><span class="legend-swatch urban"></span> Urban</span>
+          <span class="legend-item"><span class="legend-swatch industrial"></span> Industrial</span>
+          <span class="legend-item"><span class="legend-swatch known"></span> Known</span>
+          <span class="legend-item"><span class="legend-swatch discovered"></span> Discovered</span>
+        </div>
+        <div class="map-grid" id="mapGrid"></div>
+        <div class="map-places" id="mapPlaces"></div>
+      </div>
+      <div class="chat-panel">
+        <h2>Room Chat</h2>
+        <div class="chat-log" id="chatLog"></div>
+        <div class="row">
+          <input type="text" id="chatInput" placeholder="Say something to the room...">
+          <button id="chatSendBtn">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const PLAYER_LABELS = {
+  1: "Survivor",
+  2: "Survivor",
+  3: "Survivor",
+};
+const VALID_PLAYERS = [1, 2, 3];
+
+const DEFAULT_API_BASE = "http://127.0.0.1:8000";
+function getApiBase(){
+  const currentOrigin = window.location && window.location.origin;
+  if(currentOrigin && currentOrigin !== "null" && !currentOrigin.startsWith("file://")){
+    return currentOrigin;
+  }
+  return DEFAULT_API_BASE;
+}
+const API_BASE = getApiBase();
+const WS_BASE = API_BASE.replace(/^http/, "ws");
+
+let roomCode = null;
+let ws = null;
+let mySlot = null;
+let activePlayer = 1;
+let roomState = null;
+let saveStatusTimer = null;
+
+function escapeHtml(str){
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// Background image uploader/initializer
+document.addEventListener('DOMContentLoaded', () => {
+  const upload = document.getElementById('bgUpload');
+  const bgImg = document.getElementById('bgImage');
+
+  const applyBackground = (src) => {
+    if(!src) return;
+    // Prepend the uploaded image to the existing body background
+    const current = getComputedStyle(document.body).backgroundImage || '';
+    document.body.style.backgroundImage = `url(${src}), ${current}`;
+    document.body.classList.add('with-custom-bg');
+  };
+
+  // If a hidden bgImage exists and has a src, prefer it
+  if(bgImg && bgImg.src){
+    applyBackground(bgImg.src);
+  }
+
+  if(upload){
+    upload.addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      if(!f) return;
+      const reader = new FileReader();
+      reader.onload = function(ev){
+        applyBackground(ev.target.result);
+      };
+      reader.readAsDataURL(f);
+    });
+  }
+});
+
+/* ---------------- Lobby ---------------- */
+const lobbyScreen = document.getElementById("lobbyScreen");
+const slotScreen = document.getElementById("slotScreen");
+const gameApp = document.getElementById("gameApp");
+
+document.getElementById("createRoomBtn").addEventListener("click", async () => {
+  const createResult = document.getElementById("createResult");
+  createResult.textContent = "Creating room...";
+  try {
+    const res = await fetch(`${API_BASE}/api/rooms`, { method: "POST" });
+    if(!res.ok){
+      const text = await res.text();
+      throw new Error(text || "The backend could not create the room.");
+    }
+    const data = await res.json();
+    createResult.textContent = `Room created: ${data.code} — share this code with the others.`;
+    enterRoom(data.code);
+  } catch (err) {
+    createResult.textContent = `Could not create room: ${err.message}`;
+  }
+});
+
+document.getElementById("joinRoomBtn").addEventListener("click", () => {
+  const code = document.getElementById("joinCodeInput").value.trim().toUpperCase();
+  if(!code) return;
+  enterRoom(code);
+});
+
+document.getElementById("loadRoomBtn").addEventListener("click", async () => {
+  const code = document.getElementById("joinCodeInput").value.trim().toUpperCase();
+  if(!code) {
+    document.getElementById("loadStatus").textContent = "Enter a room code first.";
+    return;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/rooms/${encodeURIComponent(code)}/load`);
+    const data = await res.json();
+    if(!res.ok || !data.saved){
+      document.getElementById("loadStatus").textContent = "No saved room found for that code.";
+      return;
+    }
+    roomCode = data.code;
+    roomState = data.state;
+    document.getElementById("roomCodeLabel").textContent = data.code;
+    document.getElementById("roomCodeLabel2").textContent = data.code;
+    lobbyScreen.style.display = "none";
+    slotScreen.style.display = "block";
+    gameApp.style.display = "none";
+    renderSlotPicker();
+    document.getElementById("loadStatus").textContent = `Loaded saved room ${data.code}`;
+    connectWebSocket();
+  } catch (err) {
+    document.getElementById("loadStatus").textContent = "Could not load the saved room.";
+  }
+});
+
+async function enterRoom(code){
+  try {
+    const res = await fetch(`${API_BASE}/api/rooms/${encodeURIComponent(code)}`);
+    if(!res.ok){
+      document.getElementById("joinError").textContent = "No room found with that code.";
+      return;
+    }
+    roomCode = code;
+    document.getElementById("roomCodeLabel").textContent = code;
+    document.getElementById("roomCodeLabel2").textContent = code;
+    lobbyScreen.style.display = "none";
+    slotScreen.style.display = "block";
+    gameApp.style.display = "none";
+    connectWebSocket();
+  } catch (err) {
+    document.getElementById("joinError").textContent = `Could not reach the room server: ${err.message}`;
+  }
+}
+
+function connectWebSocket(){
+  ws = new WebSocket(`${WS_BASE}/ws/${roomCode}`);
+  ws.onopen = () => {
+    // Wait for the room state first, then let the player pick a free slot.
+  };
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if(msg.type === "state"){
+      roomState = msg.state;
+      if(mySlot !== null){
+        renderAll();
+      } else {
+        renderSlotPicker();
+        slotScreen.style.display = "block";
+        gameApp.style.display = "none";
+      }
+    }else if(msg.type === "slot_claimed"){
+      mySlot = msg.slot;
+      activePlayer = msg.slot;
+      slotScreen.style.display = "none";
+      gameApp.style.display = "block";
+      renderAll();
+    }else if(msg.type === "chat"){
+      roomState.chat.push(msg.entry);
+      renderChat();
+    }else if(msg.type === "error"){
+      alert(msg.message);
+      setSendingState(false);
+    }
+  };
+  ws.onclose = () => {
+    if(mySlot !== null){
+      alert("Connection to the room was lost. Reload the page to reconnect.");
+    }
+  };
+}
+
+function renderSlotPicker(){
+  if(!roomState) return;
+  const list = document.getElementById("slotList");
+  const totalPlayers = Object.values(roomState.occupied || {}).filter(Boolean).length;
+  document.getElementById("slotPlayerCount").textContent = `TOTAL PLAYERS: ${totalPlayers}`;
+  list.innerHTML = VALID_PLAYERS.map(n => {
+    const taken = roomState.occupied[String(n)];
+    return `
+      <div class="slot-row">
+        <span>${PLAYER_LABELS[n]}</span>
+        <button data-slot="${n}" ${taken ? "disabled" : ""}>${taken ? "Taken" : "Play this survivor"}</button>
+      </div>
+    `;
+  }).join("");
+  list.querySelectorAll("button:not(:disabled)").forEach(btn => {
+    btn.addEventListener("click", () => {
+      ws.send(JSON.stringify({ type: "claim_slot", slot: parseInt(btn.dataset.slot, 10) }));
+    });
+  });
+}
+
+/* ---------------- Game rendering ---------------- */
+function renderTabs(){
+  const bar = document.getElementById("tabBar");
+  bar.innerHTML = VALID_PLAYERS.map(n => `
+    <button class="tab-btn ${n === activePlayer ? "active" : ""}" data-player="${n}">
+      ${PLAYER_LABELS[n].split(" — ")[0]}${n === mySlot ? " (you)" : ""}
+    </button>
+  `).join("");
+  bar.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      activePlayer = parseInt(btn.dataset.player, 10);
+      renderAll();
+    });
+  });
+}
+
+function renderStats(){
+  const f = roomState.players[activePlayer].facts;
+  const totalPlayers = Object.values(roomState.occupied || {}).filter(Boolean).length;
+  document.getElementById("titleName").textContent = "FIELD LOG — " + PLAYER_LABELS[activePlayer].split(" — ")[0].toUpperCase();
+  document.getElementById("playerCount").textContent = `TOTAL PLAYERS: ${totalPlayers}`;
+  document.getElementById("statBar").innerHTML = `
+    <div class="stat-chip">DAY <b>${f.day}</b></div>
+    <div class="stat-chip">LOCATION <b>${f.location}</b></div>
+    <div class="stat-chip">POPULATION <b>${f.population}</b></div>
+    <div class="stat-chip">SURVIVAL <b>${f.survivalScore.toFixed(1)}</b></div>
+    <div class="stat-chip">ETHICS <b>${f.ethicsScore.toFixed(1)}</b></div>
+  `;
+}
+
+function renderThreads(){
+  const container = document.getElementById("threadList");
+  const threads = roomState.players[activePlayer].threads;
+  const sorted = [...threads].sort((a,b) => ({open:0,dormant:1,resolved:2}[a.status] - {open:0,dormant:1,resolved:2}[b.status]));
+  container.innerHTML = sorted.length
+    ? sorted.map(t => `<div class="thread-card ${t.status}"><span class="tab">${t.status}</span><p>${escapeHtml(t.summary)}</p></div>`).join("")
+    : `<div class="thread-empty">No threads pinned yet.</div>`;
+}
+
+function renderLog(){
+  const scroll = document.getElementById("logScroll");
+  const entries = roomState.players[activePlayer].log;
+  scroll.innerHTML = entries.map(entry => {
+    if(entry.role === "system") return `<div class="entry system"><div class="bubble">${escapeHtml(entry.text)}</div></div>`;
+    const roleLabel = entry.role === "player" ? "You" : "Narrator";
+    const body = entry.role === "player"
+      ? `<div class="bubble">${escapeHtml(entry.text)}</div>`
+      : `<p>${escapeHtml(entry.text)}</p>`;
+    return `<div class="entry"><div class="role">${roleLabel}</div>${body}</div>`;
+  }).join("");
+  scroll.scrollTop = scroll.scrollHeight;
+}
+
+function renderOtherSurvivors(){
+  const container = document.getElementById("otherSurvivors");
+  const interactions = (roomState?.interactions || []).slice(-4).reverse();
+  if(!interactions.length){
+    container.innerHTML = "";
+    container.style.display = "none";
+    return;
+  }
+  container.innerHTML = `
+    <div class="survivor-card">
+      <div class="name-row"><strong>Recent Interactions</strong></div>
+      ${interactions.map(entry => `<p class="status">Player ${entry.actor} → Player ${entry.target}: ${escapeHtml(entry.text)}</p>`).join("")}
+    </div>
+  `;
+  container.style.display = "block";
+}
+
+function _matchesCoordinate(coord, x, y){
+  return coord && coord.x === x && coord.y === y;
+}
+
+function _isInArea(x, y, area){
+  if(!area || area.length < 2) return false;
+  const x0 = Math.min(area[0].x, area[1].x);
+  const y0 = Math.min(area[0].y, area[1].y);
+  const x1 = Math.max(area[0].x, area[1].x);
+  const y1 = Math.max(area[0].y, area[1].y);
+  return x >= x0 && x <= x1 && y >= y0 && y <= y1;
+}
+
+function _geographyTypeAt(x, y, geography = []){
+  let found = null;
+  for(const feature of geography){
+    if(feature.type === "river" && feature.path?.some(pt => _matchesCoordinate(pt, x, y))){
+      return "cell-river";
+    }
+    if(feature.type === "highway" && feature.path?.some(pt => _matchesCoordinate(pt, x, y))){
+      found = "cell-highway";
+    }
+    if(feature.type === "road" && feature.path?.some(pt => _matchesCoordinate(pt, x, y))){
+      found = found || "cell-road";
+    }
+    if(feature.type === "forest" && _isInArea(x, y, feature.area)){
+      found = found || "cell-forest";
+    }
+    if(feature.type === "hills" && _isInArea(x, y, feature.area)){
+      found = found || "cell-hills";
+    }
+    if(feature.type === "urban" && _isInArea(x, y, feature.area)){
+      found = found || "cell-urban";
+    }
+    if(feature.type === "industrial" && _isInArea(x, y, feature.area)){
+      found = found || "cell-industrial";
+    }
+  }
+  return found || "";
+}
+
+function renderMap(){
+  const grid = document.getElementById("mapGrid");
+  const places = document.getElementById("mapPlaces");
+  const progress = document.getElementById("mapProgress");
+  if(!grid || !places || !progress) return;
+  const world = roomState?.world_state || {};
+  const geography = world.geography || [];
+  const locations = world.locations || [];
+  const playerState = roomState?.players?.[activePlayer] || {};
+  const playerFacts = playerState.facts || {};
+  const knownInfo = (locations || []).flatMap(loc => loc.knownInformation || []);
+  const spawnLocationId = playerFacts.spawnLocationId;
+  const spawnLocation = locations.find(loc => loc.id === spawnLocationId) || null;
+  const nearbyIds = (playerFacts.nearbyLocationIds || []).filter(Boolean);
+  const focusLocations = [];
+  if(spawnLocation){
+    focusLocations.push(spawnLocation);
+  }
+  locations.forEach(loc => {
+    if(loc.id && nearbyIds.includes(loc.id) && !focusLocations.some(item => item.id === loc.id)){
+      focusLocations.push(loc);
+    }
+  });
+  if(!focusLocations.length){
+    focusLocations.push(...locations.filter(loc => loc.discovered || loc.visibleState?.status === "known"));
+  }
+  const visibleLocations = focusLocations.filter((loc, index, array) => array.findIndex(item => item.id === loc.id) === index);
+  const hiddenLocations = locations.filter(loc => !loc.discovered && loc.visibleState?.status !== "known");
+  const reveal = {
+    statusText: "Your neighborhood.",
+    revealedRoads: knownInfo.some(item => item.source === "document"),
+    revealedApproximateLocations: knownInfo.some(item => ["survivor_report", "radio_report", "direct_observation"].includes(item.source)),
+  };
+  if(spawnLocation){
+    reveal.statusText = `You woke up near ${spawnLocation.name}.`;
+  } else if(reveal.revealedApproximateLocations){
+    reveal.statusText = "You have a rough sense of where the hospital lies.";
+  } else if(reveal.revealedRoads){
+    reveal.statusText = "An old road map has revealed the major roads.";
+  }
+  progress.innerHTML = `<strong>${escapeHtml(reveal.statusText)}</strong>`;
+
+  grid.innerHTML = "";
+  const showDetailedMap = Boolean(spawnLocation || reveal.revealedRoads || reveal.revealedApproximateLocations || geography.length);
+  for(let row = 9; row >= 0; row--){
+    for(let col = 0; col < 10; col++){
+      const cell = document.createElement("div");
+      const location = visibleLocations.find(loc => _matchesCoordinate(loc.coordinates, col, row));
+      const terrainClass = _geographyTypeAt(col, row, geography);
+      cell.className = "map-cell" + (terrainClass && showDetailedMap ? ` ${terrainClass}` : "");
+      if(location){
+        const marker = document.createElement("span");
+        marker.textContent = location.id === spawnLocationId ? "◎" : (location.discovered ? "●" : "•");
+        cell.appendChild(marker);
+        cell.classList.add(location.id === spawnLocationId ? "cell-location-discovered" : (location.discovered ? "cell-location-discovered" : "cell-location-known"));
+        cell.title = location.name;
+      }
+      grid.appendChild(cell);
+    }
+  }
+
+  places.innerHTML = "";
+  const nearbyNames = Array.isArray(playerFacts.knownNearbyLocations) ? playerFacts.knownNearbyLocations : [];
+  if(nearbyNames.length){
+    places.innerHTML += `<div class=\"map-place\"><strong>Nearby landmarks</strong></div>`;
+    nearbyNames.forEach(name => {
+      places.innerHTML += `<div class=\"map-place\">${escapeHtml(name)}</div>`;
+    });
+  }
+  if(showDetailedMap && visibleLocations.length){
+    places.innerHTML += `<div class=\"map-place\"><strong>Local map</strong></div>`;
+    visibleLocations.forEach(loc => {
+      const status = loc.id === spawnLocationId ? "Spawn" : (loc.discovered ? "Discovered" : "Known");
+      places.innerHTML += `<div class=\"map-place\">${escapeHtml(loc.name)} <span>${escapeHtml(status)}</span></div>`;
+    });
+  }
+  if(hiddenLocations.length){
+    places.innerHTML += `<div class=\"map-hidden\">${hiddenLocations.length} unknown location(s) are still hidden from the map.</div>`;
+  }
+}
+
+function renderChat(){
+  const log = document.getElementById("chatLog");
+  if(!log || !roomState?.chat) return;
+  log.innerHTML = roomState.chat.map(m =>
+    `<div class="chat-msg"><b>${escapeHtml(PLAYER_LABELS[m.slot].split(" — ")[0])}:</b> ${escapeHtml(m.text)}</div>`
+  ).join("");
+  log.scrollTop = log.scrollHeight;
+}
+
+function renderAll(){
+  renderTabs();
+  renderStats();
+  renderThreads();
+  renderLog();
+  renderInteractionTargets();
+  renderOtherSurvivors();
+  renderChat();
+  renderMap();
+  renderHistory();
+}
+
+function renderInteractionTargets(){
+  const select = document.getElementById("interactionTargetSelect");
+  if(!select) return;
+  const options = VALID_PLAYERS.filter(n => n !== mySlot);
+  select.innerHTML = options.map(n => `<option value="${n}">Player ${n}</option>`).join("");
+  if(!options.length){
+    select.innerHTML = '<option value="">No other players</option>';
+  }
+}
+
+function renderHistory(){
+  const container = document.getElementById("historyPanel");
+  if(!container) return;
+  const history = (roomState?.world_state?.worldHistory || []).slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+  if(!history.length){
+    container.innerHTML = '<div class="thread-empty">No world history recorded yet.</div>';
+    return;
+  }
+  container.innerHTML = history.map(event => {
+    const causes = (event.causes || []).join(", ");
+    const effects = (event.effects || []).join(", ");
+    const id = event.eventId || "unknown";
+    return `
+      <div class="history-event">
+        <div class="meta">Day ${event.day || event.timestamp || "?"} · ${escapeHtml(event.type || "world_event")}</div>
+        <div class="body">${escapeHtml(event.description || event.summary || "World event")}</div>
+        <button type="button" data-history-id="${id}">Show causes & consequences</button>
+        <div class="history-relations" data-history-relations="${id}" style="display:none;"></div>
+      </div>
+    `;
+  }).join("");
+
+  container.querySelectorAll("button[data-history-id]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.historyId;
+      const panel = container.querySelector(`[data-history-relations="${id}"]`);
+      if(!panel) return;
+      const event = history.find(item => (item.eventId || item.id) === id);
+      if(!event){ return; }
+      const causeList = (event.causes || []).length ? event.causes.map(item => `<div>• ${escapeHtml(item)}</div>`).join("") : '<div>• None recorded</div>';
+      const effectList = (event.effects || []).length ? event.effects.map(item => `<div>• ${escapeHtml(item)}</div>`).join("") : '<div>• None recorded</div>';
+      panel.innerHTML = `<div><strong>Causes</strong><br>${causeList}</div><div style="margin-top:8px;"><strong>Consequences</strong><br>${effectList}</div>`;
+      panel.style.display = panel.style.display === "block" ? "none" : "block";
+    });
+  });
+}
+
+function updateSaveStatus(text){
+  const el = document.getElementById("saveStatus");
+  if(!el) return;
+  el.textContent = text;
+  if(saveStatusTimer) clearTimeout(saveStatusTimer);
+  saveStatusTimer = setTimeout(() => {
+    const state = roomState?.meta;
+    if(state?.saved){
+      el.textContent = `Saved ${state.save_count || 1} time${(state.save_count || 1) === 1 ? "" : "s"}`;
+    } else {
+      el.textContent = "Not saved yet";
+    }
+  }, 2200);
+}
+
+async function saveCurrentRoom(){
+  if(!roomCode || !roomState) return;
+  const saveBtn = document.getElementById("saveRoomBtn");
+  if(saveBtn) saveBtn.disabled = true;
+  updateSaveStatus("Saving room...");
+  try{
+    const res = await fetch(`${API_BASE}/api/rooms/${encodeURIComponent(roomCode)}/save`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ state: roomState, saved_by_slot: mySlot })
+    });
+    const data = await res.json();
+    if(res.ok){
+      roomState = data.state;
+      updateSaveStatus(`Saved by Player ${mySlot || "?"}`);
+    } else {
+      updateSaveStatus("Save failed");
+    }
+  } catch (err) {
+    updateSaveStatus("Save failed");
+  } finally {
+    if(saveBtn) saveBtn.disabled = false;
+  }
+}
+
+/* ---------------- Sending ---------------- */
+const sendBtn = document.getElementById("sendBtn");
+const interactionBtn = document.getElementById("interactionBtn");
+const inputEl = document.getElementById("playerInput");
+const loadingLine = document.getElementById("loadingLine");
+const saveRoomBtn = document.getElementById("saveRoomBtn");
+const interactionTargetSelect = document.getElementById("interactionTargetSelect");
+let isSending = false;
+
+function setSendingState(sending){
+  isSending = sending;
+  sendBtn.disabled = sending;
+  inputEl.disabled = sending;
+  loadingLine.style.display = sending ? "block" : "none";
+}
+
+function sendDecision(targetSlot = null){
+  if(isSending) return;
+  const text = inputEl.value.trim();
+  if(!text) return;
+  if(activePlayer !== mySlot){
+    alert("You can only log decisions for your own survivor. Switch to your tab first.");
+    return;
+  }
+  inputEl.value = "";
+  setSendingState(true);
+  const payload = { type: "decision", slot: mySlot, text };
+  if(targetSlot !== null){ payload.target_slot = targetSlot; }
+  ws.send(JSON.stringify(payload));
+  const clearOnState = () => { setSendingState(false); };
+  ws.addEventListener("message", function handler(e){
+    const m = JSON.parse(e.data);
+    if(m.type === "state"){ clearOnState(); ws.removeEventListener("message", handler); }
+  });
+}
+
+sendBtn.addEventListener("click", () => {
+  sendDecision();
+});
+
+interactionBtn.addEventListener("click", () => {
+  const targetSlot = parseInt(interactionTargetSelect.value, 10);
+  if(!targetSlot){
+    alert("Choose another player to interact with.");
+    return;
+  }
+  sendDecision(targetSlot);
+});
+
+inputEl.addEventListener("keydown", (e) => {
+  if(e.key === "Enter" && !e.shiftKey){
+    e.preventDefault();
+    sendBtn.click();
+  }
+});
+
+saveRoomBtn.addEventListener("click", () => {
+  if(mySlot === null) {
+    updateSaveStatus("Claim a slot first");
+    return;
+  }
+  saveCurrentRoom();
+});
+
+document.getElementById("chatSendBtn").addEventListener("click", () => {
+  const input = document.getElementById("chatInput");
+  const text = input.value.trim();
+  if(!text || mySlot === null) return;
+  input.value = "";
+  ws.send(JSON.stringify({ type: "chat", slot: mySlot, text }));
+});
+document.getElementById("chatInput").addEventListener("keydown", (e) => {
+  if(e.key === "Enter"){
+    e.preventDefault();
+    document.getElementById("chatSendBtn").click();
+  }
+});
+</script>
+</body>
+</html>
