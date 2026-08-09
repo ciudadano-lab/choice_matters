@@ -53,7 +53,7 @@ app.add_middleware(
 
 init_db()
 
-@app.get('/ping', status_code=status.HTTP_200_OK)
+@app.get('/ping', status_code=status.HTTP_200_OK, include_in_schema=False)
 def ping():
     return {'ping':'pong'}
 
