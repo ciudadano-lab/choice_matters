@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, stat
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from fastapi.responses import Response
 
 BACKEND_DIR = Path(__file__).resolve().parent
 if str(BACKEND_DIR) not in sys.path:
@@ -56,6 +57,10 @@ init_db()
 @app.get('/ping', status_code=status.HTTP_200_OK, include_in_schema=False)
 def ping():
     return {'ping':'pong'}
+
+@app.head('/ping', include_in_schema=False)
+def ping_head():
+    return Response(status_code=status.HTTP_200_OK)
 
 @app.get("/", include_in_schema=False)
 def serve_frontend():
