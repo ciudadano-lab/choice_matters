@@ -1,92 +1,65 @@
-"""
-Narrator LLM call, async so a slow response from one room doesn't stall
-the websocket event loop for every other room.
-
-Uses Gemini via the Google Generative AI API.
-"""
-
 import os
 import httpx
-from pathlib import Path
 
 from env_config import get_backend_setting
 
-GEMINI_API_KEY = get_backend_setting("GEMINI_API_KEY", "")
-# Allow overriding the model via env var for flexibility (e.g. GEMINI_MODEL=gemini-3.5-flash)
-GEMINI_MODEL = get_backend_setting("GEMINI_MODEL", "gemini-3.5-flash")
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+GROQ_API_KEY = get_backend_setting("GROQ_API_KEY", "")
+GROQ_MODEL = get_backend_setting("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
 async def call_narrator(system_prompt: str, user_text: str) -> str:
-    if not GEMINI_API_KEY:
+    if not GROQ_API_KEY:
         return (
-            "Fallback mode: no Gemini API key was configured on the server. "
+            "Fallback mode: no Groq API key was configured on the server. "
             "Proceeding with a deterministic fallback narrator. "
             "Next decision: perform the user's requested action using local logic."
         )
 
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(
-            f"{GEMINI_URL}?key={GEMINI_API_KEY}",
-            headers={"Content-Type": "application/json"},
+            GROQ_URL,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+            },
             json={
-                "contents": [
-                    {
-                        "parts": [
-                            {"text": f"{system_prompt}\n\nUser input:\n{user_text}"}
-                        ]
-                    }
+                "model": GROQ_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_text or "begin"},
                 ],
-                "generationConfig": {
-                    "temperature": 0.8,
-                    "maxOutputTokens": 1000,
-                },
+                "temperature": 0.8,
+                "max_tokens": 1000,
             },
         )
 
     if response.status_code >= 400:
         body = response.text or "<empty response>"
         if response.status_code in (401, 403):
-            err = RuntimeError(f"Gemini API key was rejected ({response.status_code}). Raw response:\n{body}")
+            err = RuntimeError(f"Groq API key was rejected ({response.status_code}). Raw response:\n{body}")
             err.raw_response = body
             raise err
         if response.status_code == 429:
-            # Quota exceeded — return a deterministic fallback so the
-            # application can continue operating without the LLM.
             return (
                 "Fallback mode: the narrator LLM quota was exceeded. "
                 "Proceeding with a deterministic fallback narrator. "
                 "Next decision: perform the user's requested action using local logic."
             )
-        err = RuntimeError(f"Gemini request failed ({response.status_code}). Raw response:\n{body}")
+        err = RuntimeError(f"Groq request failed ({response.status_code}). Raw response:\n{body}")
         err.raw_response = body
         raise err
 
     try:
         data = response.json()
     except ValueError as exc:
-        err = RuntimeError(f"Gemini returned a non-JSON payload. Raw response:\n{response.text}")
+        err = RuntimeError(f"Groq returned a non-JSON payload. Raw response:\n{response.text}")
         err.raw_response = response.text
         raise err from exc
 
     try:
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+        return data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
-        err = RuntimeError(f"Gemini response did not contain the expected text block. Raw response:\n{response.text}")
+        err = RuntimeError(f"Groq response did not contain expected text. Raw response:\n{response.text}")
         err.raw_response = response.text
         raise err from exc
-
-
-# --- To use Anthropic's Claude instead of DeepSeek ---------------------------
-# import anthropic
-# ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-# client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
-# async def call_narrator(system_prompt: str, user_text: str) -> str:
-#     msg = await client.messages.create(
-#         model="claude-sonnet-4-6",
-#         max_tokens=1000,
-#         system=system_prompt,
-#         messages=[{"role": "user", "content": user_text}],
-#     )
-#     return "".join(block.text for block in msg.content if block.type == "text")
-# -------------------------------------------------------------------------------
