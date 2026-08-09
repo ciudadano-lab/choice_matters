@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -53,6 +53,9 @@ app.add_middleware(
 
 init_db()
 
+@app.get('/ping', status_code=status.HTTP_200_OK)
+def ping():
+    return {'ping':'pong'}
 
 @app.get("/", include_in_schema=False)
 def serve_frontend():
