@@ -99,3 +99,22 @@ def test_saving_someone_increases_trust_and_loyalty():
     rel = player["trustRelationships"]["player_1"]
     assert rel["trust"] > 0.5
     assert rel["loyalty"] > 0.5
+
+
+def test_relationship_system_tracks_named_npc_relationships_from_known_characters():
+    world_state = build_world_state()
+    system = RelationshipSystem(seed=8)
+    world_state.players[0]["entities"]["knownCharacters"] = [{
+        "id": "npc_arvind_rao",
+        "name": "Dr. Arvind Rao",
+        "traits": ["stubborn", "resourceful"],
+        "status": "companion",
+        "lastSeenDay": 1,
+    }]
+
+    system.apply_event(world_state, "npc_arvind_rao", "player_2", "save", severity=2)
+
+    player = next(player for player in world_state.players if player["id"] == "player_2")
+    rel = player["trustRelationships"]["npc_arvind_rao"]
+    assert rel["trust"] > 0.5
+    assert rel["loyalty"] > 0.5

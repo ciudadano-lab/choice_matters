@@ -1,5 +1,8 @@
+import pytest
+
+from game_data import TACTICAL_ACTION_TYPES
 from world_state import WorldState
-from intent_parser import parse_player_intent
+from intent_parser import IntentParser, parse_player_intent
 
 
 def build_world_state():
@@ -123,3 +126,34 @@ def test_rejects_actions_that_require_travel_without_transport():
 
     assert actions == []
     assert error == "Action requires travel first.\nEstimated travel time: 2 days."
+
+
+def test_parser_coverage_matches_current_tactical_taxonomy():
+    parser = IntentParser()
+
+    assert set(parser._action_patterns) == set(TACTICAL_ACTION_TYPES)
+    assert set(parser._GENERIC_ACTION_CONFIG) | set(parser._SPECIAL_ACTION_TYPES) == set(TACTICAL_ACTION_TYPES)
+
+
+@pytest.mark.parametrize("command, expected_type", [
+    ("Travel to the school.", "travel"),
+    ("Search the pharmacy.", "search"),
+    ("Scavenge the pharmacy.", "scavenge"),
+    ("Gather supplies.", "gather"),
+    ("Build a shelter.", "build"),
+    ("Reinforce the school.", "reinforce"),
+    ("Rest at the shelter.", "rest"),
+    ("Communicate with the survivors.", "communicate"),
+    ("Negotiate with the survivors.", "negotiate"),
+    ("Attack the school.", "attack"),
+    ("Defend the school.", "defend"),
+    ("Trade with the survivors.", "trade"),
+    ("Recruit survivors.", "recruit"),
+    ("Send a mission to Player 2.", "send_mission"),
+    ("Establish a settlement at the school.", "establish_settlement"),
+])
+def test_parser_recognizes_each_tactical_action(command, expected_type):
+    actions, error = parse_player_intent(command, actor="player_1", world_state=build_world_state())
+
+    assert error is None
+    assert [action.actionType for action in actions] == [expected_type]

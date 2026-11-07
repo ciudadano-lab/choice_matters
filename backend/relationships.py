@@ -102,6 +102,11 @@ class RelationshipSystem:
         for player in players:
             if player.get("id") == player_id:
                 return player
+            entities = player.get("entities", {}) if isinstance(player, dict) else {}
+            if isinstance(entities, dict):
+                for npc in entities.get("knownCharacters", []):
+                    if isinstance(npc, dict) and npc.get("id") == player_id:
+                        return npc
         return None
 
     def _get_personality(self, player: dict[str, Any]) -> PersonalityProfile:

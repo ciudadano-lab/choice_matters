@@ -10,6 +10,7 @@ BACKEND_DIR = Path(__file__).resolve().parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+from game_data import TACTICAL_ACTION_TYPES
 from simulation_engine import StructuredAction
 from world_state import WorldState
 
@@ -21,10 +22,14 @@ class ParsedIntent:
 
 
 class IntentParser:
+    _TACTICAL_ACTION_TYPES = frozenset(TACTICAL_ACTION_TYPES)
+    _SPECIAL_ACTION_TYPES = frozenset({"reinforce", "search"})
+
     def __init__(self) -> None:
         self._action_patterns = {
             "reinforce": re.compile(r"\breinforce\b|\bfortify\b|\bboard up\b", re.IGNORECASE),
             "search": re.compile(r"\bsearch\b|\bscout\b|\bcheck\b", re.IGNORECASE),
+            "scavenge": re.compile(r"\bscavenge\b|\bloot\b|\bsalvage\b|\braid\b.*\bsupplies\b", re.IGNORECASE),
             "gather": re.compile(r"\bgather\b|\bcollect\b", re.IGNORECASE),
             "build": re.compile(r"\bbuild\b|\bconstruct\b", re.IGNORECASE),
             "travel": re.compile(r"\btravel\b|\bgo to\b|\bmove to\b", re.IGNORECASE),
@@ -105,6 +110,7 @@ class IntentParser:
     # whether the target must be a real location id, and the flavor cost.
     _GENERIC_ACTION_CONFIG: dict[str, dict[str, Any]] = {
         "travel": {"default_target": "school", "needs_location": True, "timeCost": 2, "resourceCost": {}, "risks": ["zombie_encounter"], "prerequisites": ["can_travel"]},
+        "scavenge": {"default_target": "supermarket", "needs_location": True, "timeCost": 1, "resourceCost": {}, "risks": ["zombie_encounter"], "prerequisites": []},
         "gather": {"default_target": "supermarket", "needs_location": False, "timeCost": 1, "resourceCost": {}, "risks": ["exposure"], "prerequisites": []},
         "build": {"default_target": "shelter", "needs_location": False, "timeCost": 2, "resourceCost": {"food": 1}, "risks": ["exposure"], "prerequisites": []},
         "rest": {"default_target": "shelter", "needs_location": False, "timeCost": 1, "resourceCost": {}, "risks": [], "prerequisites": []},

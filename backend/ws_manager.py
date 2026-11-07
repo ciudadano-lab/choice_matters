@@ -36,6 +36,12 @@ class RoomConnectionManager:
     def claimed_slots(self, room_code: str) -> set[int]:
         return {c["slot"] for c in self.rooms.get(room_code, []) if c["slot"] is not None}
 
+    def connection_for_slot(self, room_code: str, slot: int) -> WebSocket | None:
+        for connection in self.rooms.get(room_code, []):
+            if connection["slot"] == slot:
+                return connection["ws"]
+        return None
+
     async def broadcast(self, room_code: str, message: dict):
         dead = []
         for c in self.rooms.get(room_code, []):
@@ -43,6 +49,20 @@ class RoomConnectionManager:
                 await c["ws"].send_json(message)
             except Exception:
                 dead.append(c["ws"])
+        for ws in dead:
+            self.disconnect(room_code, ws)
+
+    async def broadcast_state(self, room_code: str, state: dict, state_builder):
+        dead = []
+        for connection in self.rooms.get(room_code, []):
+            try:
+                slot = connection["slot"]
+                await connection["ws"].send_json({
+                    "type": "state",
+                    "state": state_builder(state, slot),
+                })
+            except Exception:
+                dead.append(connection["ws"])
         for ws in dead:
             self.disconnect(room_code, ws)
 

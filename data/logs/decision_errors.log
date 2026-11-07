@@ -76,3 +76,15 @@ Raw response: N/A
 [2026-08-09 06:41:11 UTC] AI parse error for room=RQAKQ slot=1: No GEMINI_API_KEY set on the server. Add it to backend/.env (see .env.example) and restart the server.
 [2026-08-09 06:50:16 UTC] AI parse error for room=JFBEE slot=1: No GEMINI_API_KEY set on the server. Add it to backend/.env (see .env.example) and restart the server.
 [2026-08-09 06:59:04 UTC] AI parse error for room=DEESY slot=1: No GEMINI_API_KEY set on the server. Add it to backend/.env (see .env.example) and restart the server.
+[2026-08-30 13:02:22 UTC] AI parse error for room=UJFND slot=1: Groq request failed (404). Raw response:
+{"error":{"message":"The model `llama-3.1-8b-instant` does not exist or you do not have access to it.","type":"invalid_request_error","code":"model_not_found"}}
+
+[2026-08-30 13:16:55 UTC] AI parse error for room=DZGBA slot=1: Groq request failed (404). Raw response:
+{"error":{"message":"The model `llama-3.3-70b-versatile` does not exist or you do not have access to it.","type":"invalid_request_error","code":"model_not_found"}}
+
+[2026-08-30 13:21:13 UTC] AI parse error for room=XZWGY slot=1: Groq request failed (404). Raw response:
+{"error":{"message":"The model `llama-3.3-70b-versatile` does not exist or you do not have access to it.","type":"invalid_request_error","code":"model_not_found"}}
+
+[2026-08-30 17:22:11 UTC] AI parse error for room=QARXT slot=1: Groq request failed (400). Raw response:
+{"error":{"message":"Failed to validate JSON. Please adjust your prompt. See 'failed_generation' for more details.","type":"invalid_request_error","code":"json_validate_failed","failed_generation":""}}
+

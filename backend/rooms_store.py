@@ -5,6 +5,8 @@ rooms at once) — swap for Postgres later only if this actually needs to
 grow beyond that.
 """
 
+import asyncio
+import hashlib
 import json
 import os
 import random
@@ -58,7 +60,7 @@ def _serialize_state(state: dict) -> str:
 
 
 def _seed_from_code(code: str) -> int:
-    return sum(ord(ch) for ch in code)
+    return int(hashlib.sha256(code.encode("utf-8")).hexdigest()[:8], 16)
 
 
 def create_room() -> tuple[str, dict]:
@@ -92,11 +94,16 @@ def get_room(code: str) -> dict | None:
         return normalize_room_state(json.loads(row[0])) if row else None
 
 
-def save_room(code: str, state: dict) -> None:
+def _save_room_sync(code: str, state: dict) -> None:
     normalized_state = normalize_room_state(state)
     with get_conn() as conn:
         conn.execute("UPDATE rooms SET state = ? WHERE code = ?", (_serialize_state(normalized_state), code))
         conn.commit()
+
+
+async def save_room(code: str, state: dict) -> None:
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _save_room_sync, code, state)
 
 
 def room_exists(code: str) -> bool:

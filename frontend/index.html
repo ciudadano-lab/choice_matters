@@ -150,12 +150,22 @@
   .tab-btn.active{ background:linear-gradient(135deg, #a12323, #5d2113); color:#fff; border-color:rgba(255,90,90,0.24); }
   .stat-bar{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-bottom:18px; }
   .stat-chip{ background:rgba(0,0,0,0.75); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:8px 14px; font-family:'JetBrains Mono',monospace; font-size:0.82rem; color:#f2e5cd; }
+  .condition-grid{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin:-8px 0 18px; }
+  .condition-panel{ background:rgba(0,0,0,0.62); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px 14px; color:#f2e5cd; }
+  .condition-panel h3{ margin:0 0 6px; font-family:'JetBrains Mono',monospace; font-size:0.75rem; text-transform:uppercase; color:#ffd9a8; }
+  .condition-panel p{ margin:0; font-size:0.88rem; line-height:1.35; }
+  .resources-row{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin:-8px 0 18px; }
+  .period-outcome{ margin-bottom:12px; padding:12px 14px; border-left:4px solid var(--brass); background:rgba(255,255,255,0.06); color:#f2e5cd; }
+  .period-outcome strong{ color:#ffd9a8; font-family:'JetBrains Mono',monospace; font-size:0.78rem; text-transform:uppercase; }
   .player-count{ background:var(--paper); border:1px solid var(--paper-edge); border-radius:4px; padding:8px 12px; font-family:'JetBrains Mono',monospace; font-size:0.8rem; margin:0 auto 12px; display:inline-block; }
   .layout{ display:grid; grid-template-columns:2fr 1fr; gap:16px; }
   @media (max-width:800px){ .layout{ grid-template-columns:1fr; } }
   .log-panel, .corkboard, .other-survivors, .chat-panel{
     background:rgba(12,9,8,0.96); border:1px solid rgba(255,85,85,0.12); border-radius:16px; padding:18px;
   }
+  .story-summary{ margin-bottom:12px; padding:10px 12px; border:1px solid rgba(255,255,255,0.10); border-radius:10px; background:rgba(255,255,255,0.05); color:#e9d9c4; }
+  .story-summary summary{ cursor:pointer; color:#ffd9a8; font-family:'JetBrains Mono',monospace; font-size:0.8rem; text-transform:uppercase; }
+  .story-summary p{ margin:10px 0 0; line-height:1.5; font-size:0.9rem; }
   .log-scroll{ max-height:360px; overflow-y:auto; margin-bottom:12px; padding-right:4px; }
   .entry{ margin-bottom:14px; }
   .entry .role{ font-family:'JetBrains Mono',monospace; font-size:0.7rem; text-transform:uppercase; color:#ad9c8f; margin-bottom:3px; }
@@ -170,12 +180,24 @@
   .thread-card .tab{ font-family:'JetBrains Mono',monospace; font-size:0.68rem; text-transform:uppercase; color:#c2b5a4; }
   .thread-empty{ color:var(--ink-soft); font-size:0.85rem; }
   .history-panel{ background:rgba(12,9,8,0.96); border:1px solid rgba(255,85,85,0.12); border-radius:16px; padding:18px; margin-top:16px; }
+  .history-panel summary{ cursor:pointer; color:#ffd9a8; font-family:'JetBrains Mono',monospace; font-size:0.82rem; text-transform:uppercase; }
+  .history-list{ max-height:300px; overflow-y:auto; margin-top:12px; padding-right:4px; }
   .history-event{ background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); border-radius:14px; padding:12px 14px; margin-bottom:12px; color:#f3e7d0; }
   .history-event .meta{ font-family:'JetBrains Mono',monospace; font-size:0.72rem; color:#c7b89f; margin-bottom:6px; text-transform:uppercase; }
   .history-event .body{ margin-bottom:8px; }
   .history-event button{ padding:8px 12px; border-radius:10px; font-size:0.8rem; margin-top:4px; }
   .history-relations{ margin-top:8px; padding-left:10px; border-left:2px solid rgba(255,100,100,0.24); color:#dcc9aa; font-size:0.84rem; }
   .survivor-card{ background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); border-radius:14px; padding:14px; margin-bottom:12px; color:#f0e7d4; }
+  .relationships-panel{ background:rgba(12,9,8,0.96); border:1px solid rgba(255,85,85,0.12); border-radius:16px; padding:18px; }
+  .relationship-row{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:8px; }
+  .relationship-row:last-child{ margin-bottom:0; }
+  .relationship-name{ min-width:82px; color:#f0e7d4; font-size:0.86rem; }
+  .entity-panel{ background:rgba(12,9,8,0.96); border:1px solid rgba(255,85,85,0.12); border-radius:16px; padding:18px; }
+  .entity-group{ margin-bottom:12px; }
+  .entity-group:last-child{ margin-bottom:0; }
+  .entity-list{ color:#e9d9c4; font-size:0.86rem; margin:6px 0 0; padding-left:18px; }
+  .rejection-tag{ display:inline-block; margin-right:8px; padding:2px 6px; border:1px solid rgba(255,120,100,0.5); border-radius:4px; color:#ffb29b; font-family:'JetBrains Mono',monospace; font-size:0.66rem; text-transform:uppercase; }
+  .entry.rejected .bubble, .entry.impossible .bubble{ border-color:rgba(255,120,100,0.5); background:rgba(100,35,25,0.3); }
   .survivor-card .name-row{ display:flex; justify-content:space-between; align-items:center; }
   .survivor-card .meta{ font-size:0.77rem; color:#b8ab9d; margin:6px 0; }
   .survivor-card .status{ font-size:0.82rem; margin:0; }
@@ -184,30 +206,24 @@
   .chat-msg{ margin-bottom:8px; line-height:1.45; }
   .chat-msg b{ font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:#ffd9a8; }
   .map-panel{ background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); border-radius:16px; padding:16px; color:#f2e2c8; }
-  .map-grid{ display:grid; grid-template-columns:repeat(10, minmax(16px, 1fr)); gap:2px; margin-bottom:12px; }
-  .map-cell{ width:100%; padding-top:100%; position:relative; border-radius:4px; background:rgba(255,255,255,0.04); overflow:hidden; }
-  .map-cell::after{ content:''; position:absolute; inset:0; }
-  .cell-highway{ background:#8b3d3d; }
-  .cell-road{ background:#7a5f40; }
-  .cell-river{ background:#2f5a8c; }
-  .cell-forest{ background:#24482f; }
-  .cell-hills{ background:#5d5237; }
-  .cell-urban{ background:#5b4f44; }
-  .cell-industrial{ background:#4d3f3a; }
-  .cell-location-known{ box-shadow: inset 0 0 0 2px rgba(255,215,135,0.75); }
-  .cell-location-discovered{ box-shadow: inset 0 0 0 2px rgba(255,130,80,0.9); }
-  .map-cell span{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:0.7rem; color:#fff; }
-  .map-legend{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; font-size:0.82rem; }
-  .legend-item{ display:flex; align-items:center; gap:6px; }
-  .legend-swatch{ width:14px; height:14px; border-radius:3px; display:inline-block; }
-  .legend-swatch.road{background:#7a5f40;}
-  .legend-swatch.river{background:#2f5a8c;}
-  .legend-swatch.forest{background:#24482f;}
-  .legend-swatch.hills{background:#5d5237;}
-  .legend-swatch.urban{background:#5b4f44;}
-  .legend-swatch.industrial{background:#4d3f3a;}
-  .legend-swatch.known{background:#ffdb9f;}
-  .legend-swatch.discovered{background:#ff7f45;}
+  .map-panel-header{ all:unset; display:flex; justify-content:space-between; align-items:center; width:100%; cursor:pointer; }
+  .map-panel-header h2{ margin:0; }
+  .map-panel-header:hover .map-expand-hint{ opacity:1; }
+  .map-expand-hint{ font-size:0.78rem; opacity:0.6; transition:opacity 0.15s; }
+  .map-svg-wrap{ position:relative; min-height:0; margin-bottom:12px; background:rgba(0,0,0,0.15); border-radius:12px; overflow:hidden; }
+  .map-svg-wrap svg{ width:100%; height:auto; display:block; }
+  .map-modal-backdrop{ display:none; position:fixed; inset:0; z-index:100; background:rgba(0,0,0,0.75); align-items:center; justify-content:center; padding:24px; }
+  .map-modal-backdrop.open{ display:flex; }
+  .map-modal{ width:min(1100px, 95vw); max-height:90vh; display:flex; flex-direction:column; background:#1a1512; border:1px solid rgba(255,255,255,0.12); border-radius:16px; overflow:hidden; }
+  .map-modal-head{ display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid rgba(255,255,255,0.10); }
+  .map-modal-head h2{ margin:0; }
+  .map-modal-head button{ background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); color:inherit; border-radius:8px; padding:6px 14px; cursor:pointer; }
+  .map-modal-body{ padding:20px; overflow-y:auto; }
+  .map-modal-body .map-svg-wrap{ min-height:65vh; }
+  .map-district-zone{ fill-opacity:0.72; stroke:none; }
+  .map-grain{ fill:#e9d9c4; opacity:0.10; pointer-events:none; }
+  .map-district-label{ font-family:'JetBrains Mono', monospace; font-size:2.6px; fill:rgba(233,217,196,0.55); text-transform:uppercase; letter-spacing:0.3px; }
+  .map-node-label{ font-family:'JetBrains Mono', monospace; fill:#f3e7d0; pointer-events:none; }
   .map-places{ font-size:0.85rem; }
   .map-place{ margin-bottom:8px; }
   .map-place span{ display:inline-block; border-radius:10px; padding:2px 8px; background:rgba(255,255,255,0.08); color:#f8e8c5; margin-left:6px; font-size:0.78rem; }
@@ -271,12 +287,16 @@
 
   <div class="tabs" id="tabBar"></div>
   <div class="stat-bar" id="statBar"></div>
+  <div class="condition-grid" id="conditionGrid"></div>
+  <div class="resources-row" id="resourcesRow"></div>
 
   <div class="layout">
     <div class="log-panel">
+      <div id="storySummaryPanel"></div>
+      <div id="periodOutcomePanel"></div>
       <div class="log-scroll" id="logScroll"></div>
       <div class="loading-line" id="loadingLine" style="display:none;">
-        <span>●</span> the station is processing your orders&hellip;
+        <span>●</span> the settlement is resolving this strategic period&hellip;
       </div>
       <div class="interaction-row">
         <label for="interactionTargetSelect" class="muted">Interact with</label>
@@ -285,7 +305,7 @@
       </div>
       <div class="composer">
         <textarea id="playerInput" placeholder="What do you do? (free text)"></textarea>
-        <button id="sendBtn">Log Decision</button>
+        <button id="sendBtn">Set Policy</button>
       </div>
     </div>
 
@@ -295,24 +315,25 @@
         <div id="threadList"></div>
       </div>
       <div class="other-survivors" id="otherSurvivors"></div>
+      <div class="other-survivors" id="pendingEventsPanel"></div>
+      <div class="relationships-panel" id="relationshipsPanel"></div>
+      <div class="entity-panel" id="entityPanel"></div>
       <div class="history-panel">
-        <h2>World History</h2>
-        <div id="historyPanel"></div>
+        <details>
+          <summary>World History (<span id="historyCount">0</span> events)</summary>
+          <div class="history-list" id="historyPanel"></div>
+        </details>
       </div>
       <div class="map-panel">
-        <h2>Region Map</h2>
+        <button type="button" class="map-panel-header" id="mapExpandBtn">
+          <h2>Region Map</h2>
+          <span class="map-expand-hint">Click to expand ⤢</span>
+        </button>
         <div class="map-progress" id="mapProgress"></div>
-        <div class="map-legend">
-          <span class="legend-item"><span class="legend-swatch road"></span> Road</span>
-          <span class="legend-item"><span class="legend-swatch river"></span> River</span>
-          <span class="legend-item"><span class="legend-swatch forest"></span> Forest</span>
-          <span class="legend-item"><span class="legend-swatch hills"></span> Hills</span>
-          <span class="legend-item"><span class="legend-swatch urban"></span> Urban</span>
-          <span class="legend-item"><span class="legend-swatch industrial"></span> Industrial</span>
-          <span class="legend-item"><span class="legend-swatch known"></span> Known</span>
-          <span class="legend-item"><span class="legend-swatch discovered"></span> Discovered</span>
+        <span id="mapSvgAnchor"></span>
+        <div class="map-svg-wrap" id="mapSvgWrap">
+          <svg id="mapSvg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
-        <div class="map-grid" id="mapGrid"></div>
         <div class="map-places" id="mapPlaces"></div>
       </div>
       <div class="chat-panel">
@@ -327,12 +348,17 @@
   </div>
 </div>
 
+<div class="map-modal-backdrop" id="mapModalBackdrop">
+  <div class="map-modal">
+    <div class="map-modal-head">
+      <h2>Region Map</h2>
+      <button type="button" id="mapModalCloseBtn">Close ✕</button>
+    </div>
+    <div class="map-modal-body" id="mapModalBody"></div>
+  </div>
+</div>
+
 <script>
-const PLAYER_LABELS = {
-  1: "Survivor",
-  2: "Survivor",
-  3: "Survivor",
-};
 const VALID_PLAYERS = [1, 2, 3];
 
 const DEFAULT_API_BASE =  "https://zombie-sandbox.onrender.com";
@@ -352,12 +378,190 @@ let mySlot = null;
 let activePlayer = 1;
 let roomState = null;
 let saveStatusTimer = null;
+let environmentAssetsByRole = {};
+let environmentAssetsLoaded = false;
+let locationIconLookup = {};
+const roadTileImages = Object.fromEntries(
+  ["straight", "corner", "tee", "cross", "end"].map(tile => {
+    const image = new Image();
+    image.src = `/assets/roads/road_${tile}.png`;
+    return [tile, image];
+  })
+);
+
+function normalizeForMatch(str){
+  return String(str)
+    .replace(/([a-z])([A-Z])/g, "$1_$2")
+    .replace(/'/g, "")
+    .toLowerCase()
+    .replace(/\.(svg|png)$/i, "")
+    .replace(/^location_/, "")
+    .replace(/_\d+$/, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function buildIconLookup(manifestFilenames){
+  const lookup = {};
+  manifestFilenames.forEach(filename => {
+    lookup[normalizeForMatch(filename)] = filename;
+  });
+  return lookup;
+}
+
+const LOCATION_ICON_ALIASES = {
+  "Northside Police Station": "police_station.svg",
+  "Westwood School": "school.svg",
+  "East Market Supermarket": "East_market.svg",
+  "Rusty Hardware": "hardware.svg",
+  "Salty Diner": "diner.svg",
+  "Beacon Fire Station": "fire_station.svg",
+  "East Power Station": "power_station.svg",
+  "Greenway Farmstead": "farmstead.svg",
+  "Millbrook Clinic": "clinic.svg",
+  "Highline Radio Relay": "radio_relay.svg",
+  "Old Rail Yard": "rail_yard.svg",
+  "Cedar Watchtower": "watchtower.svg",
+  "Grand Regency Theater": "threater.svg",
+  "Birchwood Townhomes": "townhomes.svg",
+  "Cul-de-Sac Court": "court.svg",
+  "Scrapyard Metalworks": "scrapyard.svg",
+  "Freight Rail Depot": "rail_depot.svg",
+  "Fisherman's Co-op": "fisherman_coop.svg",
+  "Old Ferry Landing": "ferry_landing.svg",
+  "Golden Plaza Mall": "plaza_mall.svg",
+  "Silver Screen Cinema": "cinema.svg",
+  "Sunrise Laundromat": "laundromat.svg",
+  "Budget Motel 9": "motel.svg",
+  "County Courthouse": "courthouse.svg",
+  "National Guard Armory": "national_armory.svg",
+  "Riverbend Correctional Facility": "correctional_facilty.svg",
+  "Miller Family Farm": "family_farm.svg",
+  "Sunset Grain Silo": "big_silo.svg",
+  "Dusty Crossroads Gas Station": "gas_station.svg",
+  "Old Barn Shelter": "barn_shelter.svg",
+  "Pine Hollow Campground": "pine_campground.svg",
+  "Ranger Lookout Station": "ranger_station.svg",
+  "The Red Door": "red_door.svg",
+  "The Bunker": "bunker.svg",
+  "Smuggler's Warehouse": "smuglers warehouse.svg",
+  "Old Tunnel Entrance": "tunnel_entrance.svg",
+  "Sunken Marina": "sunken_maria.svg",
+  "Overgrown Greenhouse": "overgrown_greenhouse.svg",
+  "Command Bunker Ruins": "bunker_ruins.svg",
+  "Abandoned Checkpoint": "checkpoint.svg",
+  "Looted Electronics Store": "electronics_store.svg",
+  "Overrun Farmhouse": "farmhouse.svg",
+  "Overgrown Nature Trail": "nattural_trails.svg",
+};
+
+function findIconFile(locationName, lookup){
+  return lookup[normalizeForMatch(locationName)] || lookup[normalizeForMatch(LOCATION_ICON_ALIASES[locationName] || "")] || null;
+}
+
+function addBuildingPlaceholder(group, x, y, size, namespace){
+  const body = document.createElementNS(namespace, "rect");
+  body.setAttribute("x", x + size * 0.14);
+  body.setAttribute("y", y + size * 0.28);
+  body.setAttribute("width", size * 0.72);
+  body.setAttribute("height", size * 0.72);
+  body.setAttribute("fill", "#b99b6a");
+  body.setAttribute("stroke", "#352a20");
+  body.setAttribute("stroke-width", Math.max(0.18, size * 0.035));
+  group.appendChild(body);
+
+  const roof = document.createElementNS(namespace, "path");
+  roof.setAttribute("d", `M ${x + size * 0.08} ${y + size * 0.32} L ${x + size * 0.5} ${y + size * 0.04} L ${x + size * 0.92} ${y + size * 0.32} Z`);
+  roof.setAttribute("fill", "#6f4334");
+  roof.setAttribute("stroke", "#352a20");
+  roof.setAttribute("stroke-width", Math.max(0.18, size * 0.035));
+  group.appendChild(roof);
+
+  const door = document.createElementNS(namespace, "rect");
+  door.setAttribute("x", x + size * 0.42);
+  door.setAttribute("y", y + size * 0.62);
+  door.setAttribute("width", size * 0.16);
+  door.setAttribute("height", size * 0.38);
+  door.setAttribute("fill", "#46352a");
+  group.appendChild(door);
+}
+
+fetch(`${API_BASE}/assets/environment-manifest`)
+  .then(response => response.ok ? response.json() : {})
+  .then(manifest => {
+    environmentAssetsByRole = {};
+    for(const [role, files] of Object.entries(manifest || {})){
+      const byAssetId = {};
+      (Array.isArray(files) ? files : []).forEach(file => {
+        const match = file.match(/^(.+)_[a-z]\.(png|webp)$/i);
+        const assetId = match ? match[1] : file.replace(/\.(png|webp)$/i, "");
+        (byAssetId[assetId] = byAssetId[assetId] || []).push(file);
+      });
+      environmentAssetsByRole[role] = Array.isArray(files) ? files : [];
+    }
+    window.__environmentAssetsByRole = environmentAssetsByRole;
+  })
+  .catch(() => {
+    window.__environmentAssetsByRole = {};
+  })
+  .finally(() => {
+    environmentAssetsLoaded = true;
+    if(roomState) renderMap();
+  });
+
+fetch(`${API_BASE}/assets/locations-manifest`)
+  .then(response => response.ok ? response.json() : [])
+  .then(files => {
+    locationIconLookup = buildIconLookup(Array.isArray(files) ? files : []);
+  })
+  .catch(() => {
+    locationIconLookup = {};
+  })
+  .finally(() => {
+    if(roomState) renderMap();
+  });
 
 function escapeHtml(str){
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
 }
+
+function playerName(slot){
+  const name = roomState?.players?.[String(slot)]?.facts?.name;
+  return name ? String(name) : `Survivor ${slot}`;
+}
+
+function settlementTier(population){
+  if(population <= 30) return 1;
+  if(population <= 100) return 2;
+  if(population <= 200) return 3;
+  return 4;
+}
+
+const mapExpandBtn = document.getElementById("mapExpandBtn");
+const mapModalBackdrop = document.getElementById("mapModalBackdrop");
+const mapModalBody = document.getElementById("mapModalBody");
+const mapSvgWrap = document.getElementById("mapSvgWrap");
+const mapSvgAnchor = document.getElementById("mapSvgAnchor");
+
+function openMapModal(){
+  if(!mapModalBody || !mapSvgWrap) return;
+  mapModalBody.appendChild(mapSvgWrap);
+  mapModalBackdrop?.classList.add("open");
+}
+
+function closeMapModal(){
+  if(!mapSvgAnchor || !mapSvgWrap) return;
+  mapSvgAnchor.after(mapSvgWrap);
+  mapModalBackdrop?.classList.remove("open");
+}
+
+mapExpandBtn?.addEventListener("click", openMapModal);
+document.getElementById("mapModalCloseBtn")?.addEventListener("click", closeMapModal);
+mapModalBackdrop?.addEventListener("click", event => {
+  if(event.target === mapModalBackdrop) closeMapModal();
+});
 
 // Background image uploader/initializer
 document.addEventListener('DOMContentLoaded', () => {
@@ -474,6 +678,7 @@ function connectWebSocket(){
     const msg = JSON.parse(event.data);
     if(msg.type === "state"){
       roomState = msg.state;
+      roundStatusText = "";
       if(mySlot !== null){
         renderAll();
       } else {
@@ -481,6 +686,17 @@ function connectWebSocket(){
         slotScreen.style.display = "block";
         gameApp.style.display = "none";
       }
+    }else if(msg.type === "round_status"){
+      roomState.pendingDecisions = msg.pendingDecisions || {};
+      roundStatusText = msg.waitingOn?.length
+        ? `Waiting on Player ${msg.waitingOn.join(", Player ")}`
+        : `Period ${msg.roundNumber} is resolving...`;
+      renderRoundStatus();
+    }else if(msg.type === "round_complete"){
+      roomState = msg.state || roomState;
+      roundStatusText = `Period ${msg.roundNumber} complete`;
+      renderAll();
+      setSendingState(false);
     }else if(msg.type === "slot_claimed"){
       mySlot = msg.slot;
       activePlayer = msg.slot;
@@ -511,7 +727,7 @@ function renderSlotPicker(){
     const taken = roomState.occupied[String(n)];
     return `
       <div class="slot-row">
-        <span>${PLAYER_LABELS[n]}</span>
+        <span>${escapeHtml(playerName(n))}</span>
         <button data-slot="${n}" ${taken ? "disabled" : ""}>${taken ? "Taken" : "Play this survivor"}</button>
       </div>
     `;
@@ -526,36 +742,88 @@ function renderSlotPicker(){
 /* ---------------- Game rendering ---------------- */
 function renderTabs(){
   const bar = document.getElementById("tabBar");
-  bar.innerHTML = VALID_PLAYERS.map(n => `
-    <button class="tab-btn ${n === activePlayer ? "active" : ""}" data-player="${n}">
-      ${PLAYER_LABELS[n].split(" — ")[0]}${n === mySlot ? " (you)" : ""}
-    </button>
-  `).join("");
-  bar.querySelectorAll(".tab-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      activePlayer = parseInt(btn.dataset.player, 10);
-      renderAll();
-    });
-  });
+  const others = VALID_PLAYERS.filter(n => n !== mySlot && roomState?.occupied?.[String(n)]);
+  bar.innerHTML = `<span class="muted">Your view: <strong>${escapeHtml(playerName(mySlot))}</strong></span>` +
+    (others.length ? ` <span class="muted">| Connected: ${others.map(n => {
+      const status = roomState.players[String(n)]?.status || "alive";
+      return `${escapeHtml(playerName(n))} (${status})`;
+    }).join(", ")}</span>` : "");
 }
 
 function renderStats(){
   const f = roomState.players[activePlayer].facts;
+  const actorId = `player_${activePlayer}`;
+  const worldPlayers = roomState?.world_state?.players || [];
+  const actor = worldPlayers.find(player => player.id === actorId) || {};
   const totalPlayers = Object.values(roomState.occupied || {}).filter(Boolean).length;
-  document.getElementById("titleName").textContent = "FIELD LOG — " + PLAYER_LABELS[activePlayer].split(" — ")[0].toUpperCase();
+  document.getElementById("titleName").textContent = "FIELD LOG — " + playerName(activePlayer).toUpperCase();
   document.getElementById("playerCount").textContent = `TOTAL PLAYERS: ${totalPlayers}`;
   document.getElementById("statBar").innerHTML = `
-    <div class="stat-chip">DAY <b>${f.day}</b></div>
+    <div class="stat-chip">PERIOD <b>${roomState.roundNumber || 1}</b></div>
+    <div class="stat-chip">HORIZON <b>${roomState.strategicPeriodDays || 21} DAYS</b></div>
     <div class="stat-chip">LOCATION <b>${f.location}</b></div>
     <div class="stat-chip">POPULATION <b>${f.population}</b></div>
-    <div class="stat-chip">SURVIVAL <b>${f.survivalScore.toFixed(1)}</b></div>
-    <div class="stat-chip">ETHICS <b>${f.ethicsScore.toFixed(1)}</b></div>
+    <div class="stat-chip">SURVIVAL <b>${Number(f.survivalScore ?? 0).toFixed(1)}</b></div>
+    <div class="stat-chip">ETHICS <b>${Number(f.ethicsScore ?? 0).toFixed(1)}</b></div>
   `;
+  const resources = roomState?.world_state?.resources || {};
+  const group = worldPlayers.filter(player => player.alive !== false);
+  const averageHealth = group.length ? Math.round(group.reduce((sum, player) => sum + Number(player.health ?? 0), 0) / group.length) : 0;
+  const averageStress = group.length ? Math.round(group.reduce((sum, player) => sum + Number(player.stress ?? 0), 0) / group.length) : 0;
+  const activeEffects = group.reduce((sum, player) => sum + (Array.isArray(player.statusEffects) ? player.statusEffects.length : 0), 0);
+  const condition = averageHealth < 35 ? "Critical" : averageHealth < 70 ? "Strained" : "Holding";
+  document.getElementById("conditionGrid").innerHTML = `
+    <div class="condition-panel"><h3>Group condition</h3><p>${condition} · average health ${averageHealth}</p></div>
+    <div class="condition-panel"><h3>Pressure</h3><p>Average stress ${averageStress} · ${activeEffects} active condition${activeEffects === 1 ? "" : "s"}</p></div>`;
+  document.getElementById("resourcesRow").innerHTML = ["food", "water", "medical_supplies"].map(resource =>
+    `<div class="stat-chip">${resource.replaceAll("_", " ").toUpperCase()} <b>${Number(resources[resource] ?? 0)}</b></div>`
+  ).join("");
+}
+
+function renderRelationships(){
+  const panel = document.getElementById("relationshipsPanel");
+  if(!panel) return;
+  const actor = (roomState?.world_state?.players || []).find(player => player.id === `player_${activePlayer}`) || {};
+  const relationships = actor.trustRelationships || {};
+  const connectedOthers = VALID_PLAYERS.filter(slot => slot !== activePlayer && roomState?.occupied?.[String(slot)]);
+  if(!connectedOthers.length){
+    panel.innerHTML = "";
+    panel.style.display = "none";
+    return;
+  }
+  panel.innerHTML = `<h2>Relationships</h2>${connectedOthers.map(slot => {
+    const relation = relationships[`player_${slot}`] || {};
+    const value = key => Number(relation[key] ?? 0).toFixed(2);
+    return `<div class="relationship-row"><span class="relationship-name">Player ${slot}</span><span class="stat-chip">TRUST <b>${value("trust")}</b></span><span class="stat-chip">LOYALTY <b>${value("loyalty")}</b></span><span class="stat-chip">FEAR <b>${value("fear")}</b></span></div>`;
+  }).join("")}`;
+  panel.style.display = "block";
+}
+
+function renderRoundStatus(){
+  const line = document.getElementById("loadingLine");
+  if(!line) return;
+  line.textContent = roundStatusText;
+  line.style.display = roundStatusText ? "block" : "none";
+}
+
+function renderPendingEvents(){
+  const container = document.getElementById("pendingEventsPanel");
+  if(!container) return;
+  const events = roomState?.players?.[activePlayer]?.pendingEvents || [];
+  if(!events.length){
+    container.innerHTML = "";
+    container.style.display = "none";
+    return;
+  }
+  container.innerHTML = `<div class="survivor-card"><div class="name-row"><strong>Pending Events</strong></div>${events.map(event =>
+    `<p class="status">From Player ${escapeHtml(String(event.from))}: ${escapeHtml(event.summary || "")}</p>`
+  ).join("")}</div>`;
+  container.style.display = "block";
 }
 
 function renderThreads(){
   const container = document.getElementById("threadList");
-  const threads = roomState.players[activePlayer].threads;
+  const threads = roomState.players[activePlayer].threads || [];
   const sorted = [...threads].sort((a,b) => ({open:0,dormant:1,resolved:2}[a.status] - {open:0,dormant:1,resolved:2}[b.status]));
   container.innerHTML = sorted.length
     ? sorted.map(t => `<div class="thread-card ${t.status}"><span class="tab">${t.status}</span><p>${escapeHtml(t.summary)}</p></div>`).join("")
@@ -564,16 +832,53 @@ function renderThreads(){
 
 function renderLog(){
   const scroll = document.getElementById("logScroll");
-  const entries = roomState.players[activePlayer].log;
+  const entries = (roomState.players[activePlayer].log || []).filter(entry =>
+    entry.role !== "system" || !String(entry.text || "").startsWith("[World]")
+  );
   scroll.innerHTML = entries.map(entry => {
     if(entry.role === "system") return `<div class="entry system"><div class="bubble">${escapeHtml(entry.text)}</div></div>`;
     const roleLabel = entry.role === "player" ? "You" : "Narrator";
+    const rejected = Boolean(entry.rejected || entry.physicallyImpossible);
+    const rejectionTag = rejected ? '<span class="rejection-tag">✗ Not possible</span>' : '';
+    const entryClass = rejected ? (entry.physicallyImpossible ? " impossible" : " rejected") : "";
     const body = entry.role === "player"
       ? `<div class="bubble">${escapeHtml(entry.text)}</div>`
-      : `<p>${escapeHtml(entry.text)}</p>`;
-    return `<div class="entry"><div class="role">${roleLabel}</div>${body}</div>`;
+      : `<div class="bubble">${rejectionTag}${escapeHtml(entry.text)}</div>`;
+    return `<div class="entry${entryClass}"><div class="role">${roleLabel}</div>${body}</div>`;
   }).join("");
   scroll.scrollTop = scroll.scrollHeight;
+}
+
+function renderStorySummary(){
+  const panel = document.getElementById("storySummaryPanel");
+  if(!panel) return;
+  const actor = (roomState?.world_state?.players || []).find(player => player.id === `player_${activePlayer}`) || {};
+  const summary = typeof actor.storySummary === "string" ? actor.storySummary.trim() : "";
+  panel.innerHTML = summary
+    ? `<details class="story-summary"><summary>Story so far</summary><p>${escapeHtml(summary)}</p></details>`
+    : "";
+}
+
+function renderPeriodOutcome(){
+  const panel = document.getElementById("periodOutcomePanel");
+  if(!panel) return;
+  const outcome = roomState?.strategicPeriodOutcome;
+  if(!outcome){ panel.innerHTML = ""; return; }
+  panel.innerHTML = `<div class="period-outcome"><strong>Latest period outcome · ${escapeHtml(outcome.outcomeTier || "unresolved")}</strong><div>${escapeHtml(String(outcome.daysResolved || 0))} days resolved across the settlement.</div></div>`;
+}
+
+function renderEntities(){
+  const panel = document.getElementById("entityPanel");
+  if(!panel) return;
+  const actor = (roomState?.world_state?.players || []).find(player => player.id === `player_${activePlayer}`) || {};
+  const entities = actor.entities || {};
+  const companions = Array.isArray(entities.companions) ? entities.companions : [];
+  const possessions = Array.isArray(entities.possessions) ? entities.possessions : [];
+  const formatEntity = entity => escapeHtml(typeof entity === "string" ? entity : (entity?.name || "Unnamed"));
+  const list = (items, emptyText) => items.length
+    ? `<ul class="entity-list">${items.map(item => `<li>${formatEntity(item)}</li>`).join("")}</ul>`
+    : `<div class="muted">${emptyText}</div>`;
+  panel.innerHTML = `<h2>Your group</h2><div class="entity-group"><strong>Companions</strong>${list(companions, "No companions tracked")}</div><div class="entity-group"><strong>Inventory</strong>${list(possessions, "No possessions tracked")}</div>`;
 }
 
 function renderOtherSurvivors(){
@@ -598,7 +903,15 @@ function _matchesCoordinate(coord, x, y){
 }
 
 function _isInArea(x, y, area){
-  if(!area || area.length < 2) return false;
+  if(!area) return false;
+  if(!Array.isArray(area) && Number.isFinite(area.x) && Number.isFinite(area.y)){
+    const x0 = area.x;
+    const y0 = area.y;
+    const x1 = x0 + Math.max(0, Number(area.width || 0) - 1);
+    const y1 = y0 + Math.max(0, Number(area.height || 0) - 1);
+    return x >= x0 && x <= x1 && y >= y0 && y <= y1;
+  }
+  if(area.length < 2) return false;
   const x0 = Math.min(area[0].x, area[1].x);
   const y0 = Math.min(area[0].y, area[1].y);
   const x1 = Math.max(area[0].x, area[1].x);
@@ -635,10 +948,10 @@ function _geographyTypeAt(x, y, geography = []){
 }
 
 function renderMap(){
-  const grid = document.getElementById("mapGrid");
+  if(!environmentAssetsLoaded) return;
   const places = document.getElementById("mapPlaces");
   const progress = document.getElementById("mapProgress");
-  if(!grid || !places || !progress) return;
+  if(!places || !progress) return;
   const world = roomState?.world_state || {};
   const geography = world.geography || [];
   const locations = world.locations || [];
@@ -676,22 +989,417 @@ function renderMap(){
   }
   progress.innerHTML = `<strong>${escapeHtml(reveal.statusText)}</strong>`;
 
-  grid.innerHTML = "";
   const showDetailedMap = Boolean(spawnLocation || reveal.revealedRoads || reveal.revealedApproximateLocations || geography.length);
-  for(let row = 9; row >= 0; row--){
-    for(let col = 0; col < 10; col++){
-      const cell = document.createElement("div");
-      const location = visibleLocations.find(loc => _matchesCoordinate(loc.coordinates, col, row));
-      const terrainClass = _geographyTypeAt(col, row, geography);
-      cell.className = "map-cell" + (terrainClass && showDetailedMap ? ` ${terrainClass}` : "");
-      if(location){
-        const marker = document.createElement("span");
-        marker.textContent = location.id === spawnLocationId ? "◎" : (location.discovered ? "●" : "•");
-        cell.appendChild(marker);
-        cell.classList.add(location.id === spawnLocationId ? "cell-location-discovered" : (location.discovered ? "cell-location-discovered" : "cell-location-known"));
-        cell.title = location.name;
+  const svg = document.getElementById("mapSvg");
+  if(svg){
+    svg.innerHTML = "";
+    const NS = "http://www.w3.org/2000/svg";
+    const gridSize = world.cityLayout?.gridSize || 10;
+    const cellSize = 100 / gridSize;
+    const roadNetwork = world.cityLayout?.roadNetwork || {};
+    const roadStep = 100 / Number(roadNetwork.latticeSize || (gridSize * 4));
+    const roadHalfWidth = 0.38 * roadStep;
+    const defs = document.createElementNS(NS, "defs");
+    const grainFilter = document.createElementNS(NS, "filter");
+    grainFilter.setAttribute("id", "mapGrain");
+    grainFilter.setAttribute("x", "0");
+    grainFilter.setAttribute("y", "0");
+    grainFilter.setAttribute("width", "100%");
+    grainFilter.setAttribute("height", "100%");
+    const turbulence = document.createElementNS(NS, "feTurbulence");
+    turbulence.setAttribute("type", "fractalNoise");
+    turbulence.setAttribute("baseFrequency", "0.72");
+    turbulence.setAttribute("numOctaves", "2");
+    turbulence.setAttribute("seed", "28");
+    turbulence.setAttribute("stitchTiles", "stitch");
+    grainFilter.appendChild(turbulence);
+    defs.appendChild(grainFilter);
+    svg.appendChild(defs);
+    const grain = document.createElementNS(NS, "rect");
+    const paddedMapSize = 100 + 2 * cellSize;
+    const paddedMapOrigin = -cellSize;
+    const mapBackground = document.createElementNS(NS, "rect");
+    mapBackground.setAttribute("x", paddedMapOrigin);
+    mapBackground.setAttribute("y", paddedMapOrigin);
+    mapBackground.setAttribute("width", paddedMapSize);
+    mapBackground.setAttribute("height", paddedMapSize);
+    mapBackground.setAttribute("fill", "#526b45");
+    svg.appendChild(mapBackground);
+    grain.setAttribute("x", paddedMapOrigin); grain.setAttribute("y", paddedMapOrigin);
+    grain.setAttribute("width", paddedMapSize); grain.setAttribute("height", paddedMapSize);
+    grain.setAttribute("class", "map-grain");
+    grain.setAttribute("filter", "url(#mapGrain)");
+    svg.appendChild(grain);
+
+    function hashUnit(str){
+      let h = 2166136261;
+      for(let i = 0; i < str.length; i++){
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 16777619);
       }
-      grid.appendChild(cell);
+      return (h >>> 0) / 4294967296;
+    }
+    function scatterEnvironmentalAssets(district, roomSeed, existingNodes, roadTiles, assetPool){
+      if(!assetPool || !assetPool.length) return [];
+      const area = district.area;
+      const rectX = area.x * cellSize, rectY = (gridSize - (area.y + area.height)) * cellSize;
+      const rectW = area.width * cellSize, rectH = area.height * cellSize;
+      const DENSITY = 0.08;
+      const NODE_CLEARANCE = 5, ROAD_CLEARANCE = roadHalfWidth, ASSET_CLEARANCE = 4, MAX_RETRIES = 8;
+      const targetCount = Math.max(2, Math.min(14, Math.round(rectW * rectH * DENSITY)));
+      const placed = [];
+
+      for(let slot = 0; slot < targetCount; slot++){
+        for(let attempt = 0; attempt < MAX_RETRIES; attempt++){
+          const seedKey = `${roomSeed}:${district.id}:scatter:${slot}:${attempt}`;
+          const px = rectX + hashUnit(seedKey + ":x") * rectW;
+          const py = rectY + hashUnit(seedKey + ":y") * rectH;
+          if(existingNodes.some(n => Math.hypot(px - n.x, py - n.y) < (n.r + NODE_CLEARANCE))) continue;
+          if(roadTiles.some(road => Math.hypot(px - road.x, py - road.y) < ROAD_CLEARANCE + road.step * 0.15)) continue;
+          if(placed.some(a => Math.hypot(px - a.x, py - a.y) < ASSET_CLEARANCE)) continue;
+          const assetIndex = Math.floor(hashUnit(seedKey + ":type") * assetPool.length);
+          placed.push({ x: px, y: py, file: assetPool[assetIndex] });
+          break;
+        }
+      }
+      return placed;
+    }
+    function districtBaseColor(role){
+      return ({
+        core: "#8b3d3d",
+        residential: "#5d5237",
+        industry: "#4d3f3a",
+        trade: "#2f5a8c",
+        commercial: "#7a4f3a",
+        institutional: "#5c557a",
+        rural: "#526b45",
+        wilderness: "#2f5a3d",
+        outskirts: "#5b4f44",
+      })[role] || "#5b4f44";
+    }
+    function districtPattern(district, districtLocations){
+      const controlled = districtLocations.some(loc => loc.controllingFaction);
+      const dangerous = districtLocations.some(loc => Number(loc.dangerLevel || 1) >= 3);
+      const industrial = district.role === "industry" || districtLocations.some(loc =>
+        String(loc.type || "").toLowerCase().includes("industrial") ||
+        String(loc.category || "").toLowerCase().includes("rubble")
+      );
+      const pattern = document.createElementNS(NS, "pattern");
+      const patternId = `map-pattern-${district.id}`;
+      pattern.setAttribute("id", patternId);
+      pattern.setAttribute("patternUnits", "userSpaceOnUse");
+      pattern.setAttribute("width", "100");
+      pattern.setAttribute("height", "100");
+      const texture = document.createElementNS(NS, "image");
+      texture.setAttribute("href", "/assets/district/ground_texture.svg");
+      texture.setAttribute("x", "0"); texture.setAttribute("y", "0");
+      texture.setAttribute("width", "100"); texture.setAttribute("height", "100");
+      texture.setAttribute("preserveAspectRatio", "none");
+      pattern.appendChild(texture);
+      const tint = document.createElementNS(NS, "rect");
+      tint.setAttribute("width", "100%"); tint.setAttribute("height", "100%");
+      tint.setAttribute("fill", districtBaseColor(district.role));
+      tint.setAttribute("fill-opacity", controlled ? "0.14" : (dangerous || industrial ? "0.10" : "0.06"));
+      pattern.appendChild(tint);
+      defs.appendChild(pattern);
+      return `url(#${patternId})`;
+    }
+
+    function ensureSoftEdgeFilter(svgElement){
+      if(document.getElementById("soft-edge-blur")) return;
+      const defsElement = svgElement.querySelector("defs");
+      const filter = document.createElementNS(NS, "filter");
+      filter.setAttribute("id", "soft-edge-blur");
+      filter.setAttribute("x", "-20%"); filter.setAttribute("y", "-20%");
+      filter.setAttribute("width", "140%"); filter.setAttribute("height", "140%");
+      const blur = document.createElementNS(NS, "feGaussianBlur");
+      blur.setAttribute("stdDeviation", "1.5");
+      filter.appendChild(blur);
+      defsElement.appendChild(filter);
+    }
+
+    function createDistrictMask(svgElement, districtId, x, y, width, height){
+      const mask = document.createElementNS(NS, "mask");
+      mask.setAttribute("id", `district-mask-${districtId}`);
+      mask.setAttribute("maskUnits", "userSpaceOnUse");
+      mask.setAttribute("x", x - 4); mask.setAttribute("y", y - 4);
+      mask.setAttribute("width", width + 8); mask.setAttribute("height", height + 8);
+      const shape = document.createElementNS(NS, "rect");
+      shape.setAttribute("x", x); shape.setAttribute("y", y);
+      shape.setAttribute("width", width); shape.setAttribute("height", height);
+      shape.setAttribute("rx", 0);
+      shape.setAttribute("ry", 0);
+      shape.setAttribute("fill", "white");
+      // shape.setAttribute("filter", "url(#soft-edge-blur)");  // Disabled for sharp edges
+      mask.appendChild(shape);
+      svgElement.querySelector("defs").appendChild(mask);
+      return `url(#district-mask-${districtId})`;
+    }
+
+
+    if(showDetailedMap && (visibleLocations.length || roadNetwork.nodes?.length)){
+      const positioned = locations.flatMap(loc => {
+        const cx = Number(loc.coordinates?.x);
+        const cy = Number(loc.coordinates?.y);
+        if(!Number.isFinite(cx) || !Number.isFinite(cy)) return [];
+        return [{
+          loc,
+          x: (cx + 0.5) * cellSize,
+          y: 100 - (cy + 0.5) * cellSize,
+          gateY: 100 - cy * cellSize,
+          r: 1,
+        }];
+      });
+      const positionedById = Object.fromEntries(positioned.map(p => [p.loc.id, p]));
+      const roadTiles = (roadNetwork.nodes || []).map(node => {
+        const rotationValue = Number(node.rotation);
+        return {
+          x: Number(node.i) * roadStep,
+          y: 100 - Number(node.j) * roadStep,
+          tile: node.tile,
+          rotation: Number.isInteger(rotationValue) && rotationValue >= 0 && rotationValue <= 3
+            ? rotationValue * 90
+            : rotationValue,
+          step: roadStep,
+        };
+      }).filter(node =>
+        Number.isFinite(node.x) && Number.isFinite(node.y) &&
+        [0, 90, 180, 270].includes(node.rotation) &&
+        ["straight", "corner", "tee", "cross", "end"].includes(node.tile)
+      );
+      const tilesPerRotation = roadTiles.reduce((counts, node) => {
+        counts[node.rotation]++;
+        return counts;
+      }, { 0: 0, 90: 0, 180: 0, 270: 0 });
+      console.info(
+        `Road tiles by rotation: 0=${tilesPerRotation[0]}, 90=${tilesPerRotation[90]}, 180=${tilesPerRotation[180]}, 270=${tilesPerRotation[270]}`
+      );
+      const fullMapRoadLayer = document.createElementNS(NS, "g");
+      fullMapRoadLayer.setAttribute("id", "map-road-layer");
+      roadTiles.forEach(node => {
+        const image = document.createElementNS(NS, "image");
+        const size = roadStep * 1.03;
+        image.setAttribute("href", roadTileImages[node.tile].src);
+        image.setAttribute("x", node.x - size / 2);
+        image.setAttribute("y", node.y - size / 2);
+        image.setAttribute("width", size);
+        image.setAttribute("height", size);
+        image.setAttribute("preserveAspectRatio", "none");
+        image.setAttribute("transform", `rotate(${node.rotation} ${node.x} ${node.y})`);
+        fullMapRoadLayer.appendChild(image);
+      });
+
+      let zoomFactor = 1;
+      if(positioned.length || roadTiles.length){
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        const includeBounds = (x1, y1, x2, y2) => {
+          minX = Math.min(minX, x1);
+          minY = Math.min(minY, y1);
+          maxX = Math.max(maxX, x2);
+          maxY = Math.max(maxY, y2);
+        };
+        const fogRadius = Math.max(8, (1 + 8) * 2.4);
+        const inRevealedArea = point => visibleLocations.some(loc => {
+          const reveal = positionedById[loc.id];
+          return reveal && Math.hypot(point.x - reveal.x, point.y - reveal.y) <= fogRadius;
+        });
+        roadTiles.filter(inRevealedArea).forEach(node => {
+          const size = node.step * 1.03;
+          includeBounds(node.x - size / 2, node.y - size / 2, node.x + size / 2, node.y + size / 2);
+        });
+        const discoveredLocations = positioned.filter(p => p.loc.discovered && inRevealedArea(p));
+        discoveredLocations.forEach(p => {
+          const spriteSize = cellSize * 0.8;
+          const bottomY = p.gateY - roadHalfWidth;
+          const labelWidth = Math.min(28, p.loc.name.length * 1.6);
+          const labelHeight = 4;
+          includeBounds(
+            p.x - Math.max(spriteSize, labelWidth) / 2,
+            bottomY - spriteSize - labelHeight - 1.2,
+            p.x + Math.max(spriteSize, labelWidth) / 2,
+            bottomY
+          );
+        });
+        if(!Number.isFinite(minX)){
+          minX = 0; minY = 0; maxX = 100; maxY = 100;
+        }
+        minX = Math.max(-cellSize, minX - cellSize);
+        minY = Math.max(-cellSize, minY - cellSize);
+        maxX = Math.min(100 + cellSize, maxX + cellSize);
+        maxY = Math.min(100 + cellSize, maxY + cellSize);
+        let vbW = maxX - minX, vbH = maxY - minY;
+        const minSize = Math.min(100 + 2 * cellSize, Math.max(24, cellSize * 2));
+        if(vbW < minSize){ const grow = (minSize - vbW) / 2; minX = Math.max(-cellSize, minX - grow); vbW = Math.min(100 + 2 * cellSize - minX, minSize); }
+        if(vbH < minSize){ const grow = (minSize - vbH) / 2; minY = Math.max(-cellSize, minY - grow); vbH = Math.min(100 + 2 * cellSize - minY, minSize); }
+        svg.setAttribute("viewBox", `${minX.toFixed(1)} ${minY.toFixed(1)} ${vbW.toFixed(1)} ${vbH.toFixed(1)}`);
+        zoomFactor = vbW / 100;
+      }
+      const roomSeed = String(world.seed ?? roomCode ?? "map");
+
+      const fogMask = document.createElementNS(NS, "mask");
+      fogMask.setAttribute("id", "map-fog-mask");
+      fogMask.setAttribute("maskUnits", "userSpaceOnUse");
+      fogMask.setAttribute("maskContentUnits", "userSpaceOnUse");
+      fogMask.setAttribute("x", "0");
+      fogMask.setAttribute("y", "0");
+      fogMask.setAttribute("width", "100");
+      fogMask.setAttribute("height", "100");
+      const fogBg = document.createElementNS(NS, "rect");
+      fogBg.setAttribute("x", "0");
+      fogBg.setAttribute("y", "0");
+      fogBg.setAttribute("width", "100");
+      fogBg.setAttribute("height", "100");
+      fogBg.setAttribute("fill", "black");
+      fogMask.appendChild(fogBg);
+      visibleLocations.forEach(loc => {
+        const revealNode = positionedById[loc.id];
+        if(!revealNode) return;
+        const reveal = document.createElementNS(NS, "circle");
+        reveal.setAttribute("cx", revealNode.x);
+        reveal.setAttribute("cy", revealNode.y);
+        reveal.setAttribute("r", Math.max(8, (revealNode.r + 8) * 2.4));
+        reveal.setAttribute("fill", "white");
+        reveal.setAttribute("opacity", "0.95");
+        fogMask.appendChild(reveal);
+      });
+      const defs = svg.querySelector("defs");
+      if(defs) defs.appendChild(fogMask);
+      const worldRevealLayer = document.createElementNS(NS, "g");
+      worldRevealLayer.setAttribute("mask", "url(#map-fog-mask)");
+      worldRevealLayer.appendChild(fullMapRoadLayer);
+      const discoveredBuildingLayer = document.createElementNS(NS, "g");
+      discoveredBuildingLayer.setAttribute("id", "map-discovered-buildings");
+      positioned.filter(p => p.loc.discovered).forEach(p => {
+        const spriteSize = cellSize * 0.8;
+        const bottomY = p.gateY - roadHalfWidth;
+        const spriteX = p.x - spriteSize / 2;
+        const spriteY = bottomY - spriteSize;
+        const building = document.createElementNS(NS, "g");
+        const title = document.createElementNS(NS, "title");
+        const districtName = (world.cityLayout?.districts || []).find(d => d.id === p.loc.district)?.name || p.loc.district;
+        title.textContent = `${p.loc.name} (${districtName})\nDanger: ${p.loc.dangerLevel}/4 · Security: ${p.loc.securityLevel}/3\nFaction: ${p.loc.controllingFaction || "None"}`;
+        building.appendChild(title);
+
+        const iconFile = findIconFile(p.loc.name, locationIconLookup);
+        if(iconFile){
+          const icon = document.createElementNS(NS, "image");
+          icon.setAttribute("href", `/assets/locations/${encodeURIComponent(iconFile)}`);
+          icon.setAttribute("x", spriteX);
+          icon.setAttribute("y", spriteY);
+          icon.setAttribute("width", spriteSize);
+          icon.setAttribute("height", spriteSize);
+          icon.setAttribute("preserveAspectRatio", "xMidYMid meet");
+          icon.addEventListener("error", () => {
+            icon.remove();
+            addBuildingPlaceholder(building, spriteX, spriteY, spriteSize, NS);
+          }, { once: true });
+          building.appendChild(icon);
+        } else {
+          addBuildingPlaceholder(building, spriteX, spriteY, spriteSize, NS);
+        }
+
+        const labelFontSize = 2.4 * zoomFactor;
+        const bgWidth = Math.min(28, p.loc.name.length * 1.6) * zoomFactor;
+        const bgHeight = 4 * zoomFactor;
+        const labelY = spriteY - 1.2 * zoomFactor;
+        const labelBg = document.createElementNS(NS, "rect");
+        labelBg.setAttribute("x", p.x - bgWidth / 2);
+        labelBg.setAttribute("y", labelY - bgHeight * 0.82);
+        labelBg.setAttribute("width", bgWidth);
+        labelBg.setAttribute("height", bgHeight);
+        labelBg.setAttribute("fill", "rgba(10,7,6,0.65)");
+        labelBg.setAttribute("rx", 0.5 * zoomFactor);
+        building.appendChild(labelBg);
+        const label = document.createElementNS(NS, "text");
+        label.setAttribute("x", p.x);
+        label.setAttribute("y", labelY);
+        label.setAttribute("text-anchor", "middle");
+        label.setAttribute("class", "map-node-label");
+        label.setAttribute("style", `font-size:${labelFontSize.toFixed(3)}px`);
+        label.textContent = p.loc.name;
+        building.appendChild(label);
+        discoveredBuildingLayer.appendChild(building);
+      });
+      worldRevealLayer.appendChild(discoveredBuildingLayer);
+
+      const districts = world.cityLayout?.districts || [];
+      ensureSoftEdgeFilter(svg);
+      const districtsToTint = districts;
+      districtsToTint.forEach(d => {
+        const area = d.area;
+        const x = area.x * cellSize;
+        const y = (gridSize - 1 - (area.y + area.height - 1)) * cellSize;
+        const w = area.width * cellSize;
+        const h = area.height * cellSize;
+        const rect = document.createElementNS(NS, "rect");
+        rect.setAttribute("x", x); rect.setAttribute("y", y);
+        rect.setAttribute("width", w); rect.setAttribute("height", h);
+        rect.setAttribute("rx", 0);
+        rect.setAttribute("ry", 0);
+        rect.setAttribute("class", `map-district-zone tint-${d.id}`);
+        rect.setAttribute("mask", createDistrictMask(svg, d.id, x, y, w, h));
+        const districtLocations = visibleLocations.filter(loc =>
+          loc.discovered && _isInArea(loc.coordinates.x, loc.coordinates.y, d.area)
+        );
+        rect.setAttribute("fill", districtPattern(d, districtLocations));
+        svg.appendChild(rect);
+        const label = document.createElementNS(NS, "text");
+        label.setAttribute("x", x + 2);
+        label.setAttribute("y", y + 5);
+        label.setAttribute("class", "map-district-label");
+        const maxCharWidth = (w - 4) / Math.max(d.name.length, 1);
+        const fontSize = Math.max(1.6, Math.min(2.6, maxCharWidth / 0.6)) * zoomFactor;
+        label.setAttribute("style", `font-size:${fontSize.toFixed(3)}px`);
+        label.textContent = d.name;
+        svg.appendChild(label);
+
+        const rolePool = window.__environmentAssetsByRole?.[d.role] || [];
+        const scattered = scatterEnvironmentalAssets(d, roomSeed, positioned, roadTiles, rolePool);
+        scattered.forEach(item => {
+          const img = document.createElementNS(NS, "image");
+          img.setAttribute("href", `/assets/environment/${encodeURIComponent(d.role)}/${encodeURIComponent(item.file)}`);
+          const size = 5;
+          img.setAttribute("x", item.x - size / 2);
+          img.setAttribute("y", item.y - size / 2);
+          img.setAttribute("width", size);
+          img.setAttribute("height", size);
+          img.setAttribute("opacity", "0.82");
+          svg.appendChild(img);
+        });
+      });
+
+      svg.appendChild(worldRevealLayer);
+
+      (world.settlements || []).forEach(settlement => {
+        const coordinates = settlement.coordinates || {};
+        const x = Number(coordinates.x) * cellSize + cellSize / 2;
+        const y = (gridSize - 1 - Number(coordinates.y)) * cellSize + cellSize / 2;
+        if(!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+        const tier = settlementTier(Number(settlement.population || 0));
+        const size = 4.5 + tier * 0.45;
+        const marker = document.createElementNS(NS, "circle");
+        marker.setAttribute("cx", x);
+        marker.setAttribute("cy", y);
+        marker.setAttribute("r", size * 0.58);
+        marker.setAttribute("fill", "rgba(220,170,70,0.9)");
+        marker.setAttribute("stroke", "rgba(35,22,12,0.95)");
+        marker.setAttribute("stroke-width", "0.7");
+        const markerTitle = document.createElementNS(NS, "title");
+        markerTitle.textContent = `${settlement.name || "Settlement"} · Population ${settlement.population || 0} · Tier ${tier}`;
+        marker.appendChild(markerTitle);
+        svg.appendChild(marker);
+
+        const icon = document.createElementNS(NS, "image");
+        icon.setAttribute("href", `/assets/icons/settlement_tier${tier}.svg`);
+        icon.setAttribute("x", x - size / 2);
+        icon.setAttribute("y", y - size / 2);
+        icon.setAttribute("width", size);
+        icon.setAttribute("height", size);
+        icon.setAttribute("preserveAspectRatio", "xMidYMid meet");
+        icon.addEventListener("error", () => icon.remove());
+        svg.appendChild(icon);
+      });
     }
   }
 
@@ -719,18 +1427,25 @@ function renderChat(){
   const log = document.getElementById("chatLog");
   if(!log || !roomState?.chat) return;
   log.innerHTML = roomState.chat.map(m =>
-    `<div class="chat-msg"><b>${escapeHtml(PLAYER_LABELS[m.slot].split(" — ")[0])}:</b> ${escapeHtml(m.text)}</div>`
+    `<div class="chat-msg"><b>${escapeHtml(playerName(m.slot))}:</b> ${escapeHtml(m.text)}</div>`
   ).join("");
   log.scrollTop = log.scrollHeight;
 }
 
 function renderAll(){
+  if(mySlot !== null) activePlayer = mySlot;
   renderTabs();
   renderStats();
+  renderRoundStatus();
+  renderStorySummary();
+  renderPeriodOutcome();
   renderThreads();
   renderLog();
   renderInteractionTargets();
   renderOtherSurvivors();
+  renderPendingEvents();
+  renderRelationships();
+  renderEntities();
   renderChat();
   renderMap();
   renderHistory();
@@ -750,6 +1465,8 @@ function renderHistory(){
   const container = document.getElementById("historyPanel");
   if(!container) return;
   const history = (roomState?.world_state?.worldHistory || []).slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+  const count = document.getElementById("historyCount");
+  if(count) count.textContent = history.length;
   if(!history.length){
     container.innerHTML = '<div class="thread-empty">No world history recorded yet.</div>';
     return;
@@ -760,7 +1477,7 @@ function renderHistory(){
     const id = event.eventId || "unknown";
     return `
       <div class="history-event">
-        <div class="meta">Day ${event.day || event.timestamp || "?"} · ${escapeHtml(event.type || "world_event")}</div>
+        <div class="meta">World day ${event.day || event.timestamp || "?"} · ${escapeHtml(event.type || "world_event")}</div>
         <div class="body">${escapeHtml(event.description || event.summary || "World event")}</div>
         <button type="button" data-history-id="${id}">Show causes & consequences</button>
         <div class="history-relations" data-history-relations="${id}" style="display:none;"></div>
@@ -831,6 +1548,7 @@ const loadingLine = document.getElementById("loadingLine");
 const saveRoomBtn = document.getElementById("saveRoomBtn");
 const interactionTargetSelect = document.getElementById("interactionTargetSelect");
 let isSending = false;
+let roundStatusText = "";
 
 function setSendingState(sending){
   isSending = sending;

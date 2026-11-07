@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from simulation_engine import StructuredAction, SimulationResult
+from world_state import settlement_tier
 
 
 def _find_location_name(world_state: dict[str, Any], location_id: str) -> str:
@@ -78,6 +79,22 @@ def narrate_simulation_result(
     lines: list[str] = []
     location_name = _find_location_name(previous_state, action.target)
 
+    if result.rejected:
+        return f"The action cannot be carried out: {result.rejectionReason or 'the claimed target is not known.'}"
+    if result.physicallyImpossible:
+        return result.impossibleReason or "Nothing happens; the claimed effect is not possible in this world."
+
+    social_outcome = getattr(result, "socialOutcome", {}) or {}
+    if social_outcome.get("reaction") and action.actionType in {"recruit", "negotiate", "trade"}:
+        target_name = action.target.replace("npc_", "").replace("_", " ").title()
+        reaction = social_outcome.get("reaction")
+        if reaction == "accepted":
+            lines.append(f"{target_name} accepts the offer.")
+        elif reaction == "countered":
+            lines.append(f"{target_name} counters the proposal.")
+        else:
+            lines.append(f"{target_name} declines the offer.")
+
     if action.actionType == "travel":
         lines.append(f"You travel toward {location_name}.")
     elif action.actionType == "search":
@@ -105,7 +122,20 @@ def narrate_simulation_result(
     elif action.actionType == "send_mission":
         lines.append("You send out a mission on your behalf.")
     elif action.actionType == "establish_settlement":
-        lines.append("You work to establish a new settlement.")
+        settlements = result.updatedWorldState.get("settlements", [])
+        settlement = next(
+            (item for item in settlements if item.get("location") == action.target),
+            None,
+        )
+        if settlement is None:
+            lines.append("You work to establish a new settlement.")
+        else:
+            population = int(settlement.get("population", 0))
+            tier = settlement_tier(population)
+            lines.append(
+                f"You establish {settlement.get('name', location_name)} with "
+                f"{population} residents (settlement tier {tier})."
+            )
     else:
         lines.append(f"You perform {action.actionType}.")
 
@@ -132,10 +162,10 @@ def narrate_simulation_result(
             if content:
                 lines.append(f"You discover: {content}")
 
-    if result.encounterProbability is not None:
-        chance = int(result.encounterProbability * 100)
-        if chance > 0:
-            lines.append(f"There is a {chance}% chance of a hostile encounter.")
+    if result.encounterOccurred:
+        lines.append("A hostile encounter occurs.")
+    else:
+        lines.append("You avoid a hostile encounter this time.")
 
     lines.extend(_summarize_world_events(result.worldEventsTriggered))
 

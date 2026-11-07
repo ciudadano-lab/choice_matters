@@ -2,12 +2,16 @@
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache
 
 # Virtual environments
 .venv/
 venv/
 env/
 ENV/
+.venv-1/
+tmp_frontend_check.js
+
 
 # Environment files with secrets
 .env
@@ -20,6 +24,7 @@ ENV/
 *.sqlite3
 *.sqlite
 
+
 # IDE/editor files
 .vscode/
 .idea/
@@ -27,3 +32,7 @@ ENV/
 # OS files
 .DS_Store
 Thumbs.db
+
+# runtime data
+data/*
+!data/.gitkeep

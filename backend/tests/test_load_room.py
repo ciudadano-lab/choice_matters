@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from pathlib import Path
 
@@ -16,7 +17,7 @@ def test_load_room_endpoint_returns_saved_state(tmp_path, monkeypatch):
     code, state = rooms_store.create_room()
     state["meta"]["saved"] = True
     state["meta"]["save_count"] = 1
-    rooms_store.save_room(code, state)
+    asyncio.run(rooms_store.save_room(code, state))
 
     client = TestClient(main.app)
     response = client.get(f"/api/rooms/{code}/load")
