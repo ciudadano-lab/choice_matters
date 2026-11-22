@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import json
 import math
@@ -24,7 +25,7 @@ from factor_library import (
     owned_item_ids as factor_owned_item_ids,
 )
 from economy import get_starting_resources
-from probability_config import CHANCE_MAX, CHANCE_MIN
+from probability_config import CHANCE_MAX, CHANCE_MIN, TIME_SLOTS
 from probability_engine import run_chain
 from plan_features import PlanFeatures
 from simulation_engine import SimulationEngine, StructuredAction
@@ -48,6 +49,7 @@ CSV_FIELDS = (
     "K",
     "day",
     "slot",
+    "slot_name",
     "action_type",
     "gate_chance",
     "encounter_chance",
@@ -271,7 +273,8 @@ def _validate_result(
 ) -> None:
     context = f"seed={seed}, day={day}, bot={bot}"
     known_sources = _known_log_sources(library)
-    for step in result.rollLog:
+    roll_log = result.get("rollLog", []) if isinstance(result, dict) else result.rollLog
+    for step in roll_log:
         chance = step.get("chance")
         if not isinstance(chance, (int, float)) or not math.isfinite(chance) or not CHANCE_MIN <= chance <= CHANCE_MAX:
             raise AssertionError(f"Invalid chance {chance!r} in rollLog ({context})")
@@ -342,14 +345,46 @@ def _run_game(payload: dict[str, Any]) -> dict[str, Any]:
     for day_index in range(days):
         simulated_day = day_index + 1
         day_start = int(_world_state_value(world, "currentDay"))
-        day_interrupts = 0
-        day_injuries = 0
-        day_deaths = 0
-        day_death_causes = {cause: 0 for cause in DEATH_CAUSES}
+        players_before_tick = copy.deepcopy(_players_by_id(world))
+        for player_id, player in _players_by_id(world).items():
+            if not _is_alive(player):
+                continue
+            if day_index % replan == 0:
+                player["currentPolicy"] = _policy_for(
+                    bot,
+                    day_index,
+                    day_start,
+                    replan,
+                    random_source,
+                    world,
+                    player,
+                )
+            if not isinstance(player.get("currentPolicy"), dict):
+                raise AssertionError(
+                    f"Missing policy (seed={seed}, day={simulated_day}, bot={bot})"
+                )
+
+        _mark_lite_road_network(world, lite)
+        world = tick.advance_policy_day(world, WorldEventQueue())
+        _remove_road_network(world, lite)
+        records = tick.last_policy_day_outcomes
+        if world.currentDay != day_start + 1 or world.currentTime != "06:00":
+            raise AssertionError(
+                f"Policy day ended at {world.currentDay} {world.currentTime}; "
+                f"expected {day_start + 1} 06:00 (seed={seed}, day={simulated_day}, bot={bot})"
+            )
+
+        day_pause_records = [
+            record["pauseRecord"]
+            for record in records
+            if isinstance(record.get("pauseRecord"), dict)
+        ]
+        pause_slots = sorted({record["slot"] for record in day_pause_records})
         day_gate_count = 0
         day_gate_triggers = 0
         day_near_misses = 0
         day_encounters = 0
+        day_injuries = sum(record.get("injuries", 0) for record in records)
         day_encounter_injuries = 0
         day_encounter_outcomes = {
             "evaded": 0,
@@ -357,129 +392,90 @@ def _run_game(payload: dict[str, Any]) -> dict[str, Any]:
             "hurt": 0,
             "serious": 0,
         }
+        for record in records:
+            _validate_result(
+                record,
+                seed=seed,
+                day=simulated_day,
+                bot=bot,
+                library=library,
+            )
+            gates = [
+                step for step in record["rollLog"]
+                if step.get("kind") == "gate"
+            ]
+            encounters = [
+                step for step in record["rollLog"]
+                if step.get("kind") == "encounter"
+            ]
+            gate_triggered = any(step.get("triggered") is True for step in gates)
+            encounter_triggered = any(step.get("triggered") is True for step in encounters)
+            day_gate_count += len(gates)
+            day_gate_triggers += int(gate_triggered)
+            day_near_misses += int(gate_triggered and not encounter_triggered)
+            day_encounters += int(encounter_triggered)
+            outcome = record.get("encounterOutcome")
+            if isinstance(outcome, dict):
+                name = outcome.get("outcome")
+                if name in day_encounter_outcomes:
+                    day_encounter_outcomes[name] += 1
+                    day_encounter_injuries += int(name in {"hurt", "serious"})
 
+        day_death_causes = {cause: 0 for cause in DEATH_CAUSES}
+        day_deaths = 0
+        players_after_tick = _players_by_id(world)
+        for player_id, player in players_after_tick.items():
+            if player_id in already_dead or _is_alive(player):
+                continue
+            already_dead.add(player_id)
+            day_deaths += 1
+            day_death_causes[_death_cause(
+                players_before_tick[player_id],
+                player,
+            )] += 1
+
+        primary_records = {
+            record["playerId"]: record
+            for record in records
+            if not record.get("isAmbient")
+        }
         for slot, player_id in enumerate(player_ids, start=1):
-            players = _players_by_id(world)
-            player = players[player_id]
-            row: dict[str, Any] = {
+            player_after_tick = players_after_tick[player_id]
+            record = primary_records.get(player_id, {})
+            gates = [
+                step for step in record.get("rollLog", [])
+                if step.get("kind") == "gate"
+            ]
+            encounters = [
+                step for step in record.get("rollLog", [])
+                if step.get("kind") == "encounter"
+            ]
+            daily_rows.append({
                 "seed": seed,
                 "bot": bot,
                 "K": player_count,
                 "day": simulated_day,
                 "slot": slot,
-                "action_type": "",
-                "gate_chance": "",
-                "encounter_chance": "",
-                "gate_triggered": "",
-                "interrupt": "",
-            }
-            row_player = player
-            if _is_alive(player):
-                if day_index % replan == 0:
-                    player["currentPolicy"] = _policy_for(
-                        bot,
-                        day_index,
-                        day_start,
-                        replan,
-                        random_source,
-                        world,
-                        player,
-                    )
-                policy = player.get("currentPolicy")
-                if not isinstance(policy, dict):
-                    raise AssertionError(
-                        f"Missing policy (seed={seed}, day={simulated_day}, bot={bot})"
-                    )
+                "slot_name": record.get("slot", ""),
+                "action_type": record.get("actionType", ""),
+                "gate_chance": gates[0]["chance"] if gates else 0.0,
+                "encounter_chance": encounters[0]["chance"] if encounters else 0.0,
+                "gate_triggered": any(step.get("triggered") is True for step in gates),
+                "interrupt": record.get("interruptStep") is not None,
+                **{
+                    stat: player_after_tick.get(stat, 0)
+                    for stat in PLAYER_STATS
+                },
+            })
 
-                before_effects = _status_effect_count(player)
-                was_alive = _is_alive(player)
-                result = engine.auto_resolve_policy_day(
-                    world,
-                    player_id,
-                    policy,
-                    day_start,
-                )
-                if result.encounterOccurred:
-                    if result.resolvedAction is None:
-                        raise RuntimeError(
-                            "Triggered harness encounter is missing its resolved action"
-                        )
-                    result = tick.resolve_encounter_after_action(
-                        world,
-                        result,
-                        result.resolvedAction,
-                        seed=seed,
-                    )
-                _validate_result(
-                    result,
-                    seed=seed,
-                    day=simulated_day,
-                    bot=bot,
-                    library=library,
-                )
-                _mark_lite_road_network(result.updatedWorldState, lite)
-                world = WorldState.from_dict(result.updatedWorldState)
-                _remove_road_network(world, lite)
-                after_player = _players_by_id(world)[player_id]
-                row_player = after_player
-                day_injuries += max(0, _status_effect_count(after_player) - before_effects)
-
-                if player_id not in already_dead and was_alive and not _is_alive(after_player):
-                    already_dead.add(player_id)
-                    day_deaths += 1
-                    day_death_causes[_death_cause(player, after_player, result)] += 1
-
-                gates = [step for step in result.rollLog if step.get("kind") == "gate"]
-                encounters = [step for step in result.rollLog if step.get("kind") == "encounter"]
-                gate_triggered = any(step.get("triggered") is True for step in gates)
-                encounter_triggered = any(step.get("triggered") is True for step in encounters)
-                encounter_outcome = result.encounterOutcome
-                if isinstance(encounter_outcome, dict):
-                    outcome_name = encounter_outcome.get("outcome")
-                    if outcome_name in day_encounter_outcomes:
-                        day_encounter_outcomes[outcome_name] += 1
-                        if outcome_name in {"hurt", "serious"}:
-                            day_encounter_injuries += 1
-                gate_chance = gates[0]["chance"] if gates else 0.0
-                encounter_chance = encounters[0]["chance"] if encounters else 0.0
-                interrupt = result.interruptStep is not None
-                day_interrupts += int(interrupt)
-                day_gate_count += len(gates)
-                day_gate_triggers += int(gate_triggered)
-                day_near_misses += int(gate_triggered and not encounter_triggered)
-                day_encounters += int(encounter_triggered)
-
-                row.update({
-                    "action_type": result.actionType,
-                    "gate_chance": gate_chance,
-                    "encounter_chance": encounter_chance,
-                    "gate_triggered": gate_triggered,
-                    "interrupt": interrupt,
-                })
-            else:
-                gate_triggered = False
-                interrupt = False
-
-            for stat in PLAYER_STATS:
-                row[stat] = row_player.get(stat, 0)
-            daily_rows.append(row)
-
-        current_day = int(_world_state_value(world, "currentDay"))
-        if current_day != day_start:
-            raise AssertionError(
-                f"Action advanced currentDay from {day_start} to {current_day} "
-                f"(seed={seed}, day={simulated_day}, bot={bot})"
-            )
         _finite_player_stats(world, seed=seed, day=simulated_day, bot=bot)
-
         game_days.append({
             "day": simulated_day,
-            "pause": day_interrupts > 0,
-            "interrupts": day_interrupts,
-            "active_players": sum(
-                bool(row["action_type"])
-                for row in daily_rows[-player_count:]
-            ),
+            "pause": bool(pause_slots),
+            "pause_slots": pause_slots,
+            "pause_records": day_pause_records,
+            "interrupts": len(day_pause_records),
+            "active_players": len(primary_records),
             "gate_count": day_gate_count,
             "gate_triggers": day_gate_triggers,
             "near_misses": day_near_misses,
@@ -489,58 +485,23 @@ def _run_game(payload: dict[str, Any]) -> dict[str, Any]:
             "injuries": day_injuries,
             "deaths": day_deaths,
             "death_causes": day_death_causes,
+            "player_days": player_count,
+            "food_zero_player_days": (
+                player_count if world.resources.get("food", 0) <= 0 else 0
+            ),
+            "water_zero_player_days": (
+                player_count if world.resources.get("water", 0) <= 0 else 0
+            ),
+            "resource_zero_player_days": (
+                player_count
+                if world.resources.get("food", 0) <= 0 or world.resources.get("water", 0) <= 0
+                else 0
+            ),
         })
-
-        players_before_tick = _players_by_id(world)
-        _mark_lite_road_network(world, lite)
-        world = tick.advance(
-            world,
-            WorldEventQueue(),
-            hours=24,
-            run_autopilot=False,
-        )
-        _remove_road_network(world, lite)
-        expected_day = day_start + 1
-        if world.currentDay != expected_day:
-            raise AssertionError(
-                f"currentDay advanced from {day_start} to {world.currentDay}, "
-                f"expected {expected_day} (seed={seed}, day={simulated_day}, bot={bot})"
-            )
-        for player_id, player in _players_by_id(world).items():
-            if player_id not in already_dead and not _is_alive(player):
-                already_dead.add(player_id)
-                game_days[-1]["deaths"] += 1
-                game_days[-1]["death_causes"][_death_cause(
-                    players_before_tick[player_id],
-                    player,
-                )] += 1
-        resources_after_tick = world.resources
-        game_days[-1]["player_days"] = player_count
-        game_days[-1]["food_zero_player_days"] = (
-            player_count if resources_after_tick.get("food", 0) <= 0 else 0
-        )
-        game_days[-1]["water_zero_player_days"] = (
-            player_count if resources_after_tick.get("water", 0) <= 0 else 0
-        )
-        game_days[-1]["resource_zero_player_days"] = (
-            player_count
-            if (
-                resources_after_tick.get("food", 0) <= 0
-                or resources_after_tick.get("water", 0) <= 0
-            )
-            else 0
-        )
-        players_after_tick = _players_by_id(world)
-        for row in daily_rows[-player_count:]:
-            player_id = player_ids[int(row["slot"]) - 1]
-            player_after_tick = players_after_tick[player_id]
-            for stat in PLAYER_STATS:
-                row[stat] = player_after_tick.get(stat, 0)
-        _finite_player_stats(world, seed=seed, day=simulated_day, bot=bot)
 
         if simulated_day % WINDOW_DAYS == 0 or simulated_day == days:
             players_after_tick = list(players_after_tick.values())
-            snapshot: dict[str, Any] = {
+            window_snapshots.append({
                 "window": (simulated_day - 1) // WINDOW_DAYS + 1,
                 "end_day": simulated_day,
                 "health": _mean(player.get("health", 0) for player in players_after_tick),
@@ -550,8 +511,7 @@ def _run_game(payload: dict[str, Any]) -> dict[str, Any]:
                 "thirst": _mean(player.get("thirst", 0) for player in players_after_tick),
                 "food": _finite_value(world.resources.get("food", 0)),
                 "water": _finite_value(world.resources.get("water", 0)),
-            }
-            window_snapshots.append(snapshot)
+            })
 
     return {
         "seed": seed,
@@ -668,6 +628,14 @@ def _aggregate(
                     day.get("encounter_injuries", 0)
                     for day in grouped_days
                 )
+                slot_pause_rates = {
+                    slot_name: (
+                        sum(slot_name in day.get("pause_slots", []) for day in grouped_days)
+                        / day_count
+                        if day_count else 0.0
+                    )
+                    for slot_name, _ in TIME_SLOTS
+                }
                 windows.append({
                     "window": window_number,
                     "start_day": start_day,
@@ -678,6 +646,7 @@ def _aggregate(
                         if day_count else 0.0
                     ),
                     "world_pause_rate": world_pause_days / day_count if day_count else 0.0,
+                    "pause_rate_by_slot": slot_pause_rates,
                     "days_between_world_pauses": {
                         "mean": statistics.fmean(gaps) if gaps else None,
                         "median": statistics.median(gaps) if gaps else None,
@@ -733,6 +702,14 @@ def _aggregate(
                 day.get("encounter_injuries", 0)
                 for day in all_days
             )
+            slot_pause_rates = {
+                slot_name: (
+                    sum(slot_name in day.get("pause_slots", []) for day in all_days)
+                    / (len(group_games) * days)
+                    if group_games and days else 0.0
+                )
+                for slot_name, _ in TIME_SLOTS
+            }
             groups.append({
                 "bot": bot,
                 "players": player_count,
@@ -740,6 +717,7 @@ def _aggregate(
                 "encounters": encounters_total,
                 "encounter_outcome_counts": encounter_outcome_counts,
                 "encounter_injuries": encounter_injuries,
+                "pause_rate_by_slot": slot_pause_rates,
                 "injuries_per_encounter": (
                     encounter_injuries / encounters_total
                     if encounters_total else 0.0
@@ -955,6 +933,17 @@ def _print_play_report(report: dict[str, Any], elapsed: float, game_count: int) 
             f"{target['zero_pause_games_percent']:.1f}% of games had no pauses"
         )
     _print_impact_checks(report)
+    print("\nWorld pause rate by slot:")
+    print("bot              K dawn    day   dusk  night")
+    for group in report["groups"]:
+        rates = group.get("pause_rate_by_slot", {})
+        print(
+            f"{group['bot']:<16} {group['players']} "
+            f"{rates.get('dawn', 0.0):5.3f} "
+            f"{rates.get('day', 0.0):5.3f} "
+            f"{rates.get('dusk', 0.0):5.3f} "
+            f"{rates.get('night', 0.0):5.3f}"
+        )
     _print_encounter_outcomes(report)
     _print_economy_health(report)
     print(f"\n{game_count} games in {elapsed:.3f}s: {game_count / elapsed if elapsed else 0.0:.2f} games/second")

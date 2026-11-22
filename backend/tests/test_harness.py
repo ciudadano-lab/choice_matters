@@ -51,6 +51,10 @@ def test_tiny_play_completes_for_every_bot_and_player_count():
     assert all(row["action_type"] for row in rows)
     assert all(group["player_days"] == 2 * group["games"] * group["players"] for group in report["groups"])
     assert all(sum(group["death_causes"].values()) == group["deaths"] for group in report["groups"])
+    assert all(
+        set(group["pause_rate_by_slot"]) == {"dawn", "day", "dusk", "night"}
+        for group in report["groups"]
+    )
 
 
 def test_economy_health_report_shows_death_causes_and_resource_zero_rates(capsys):

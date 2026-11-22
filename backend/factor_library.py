@@ -197,9 +197,15 @@ class ChainTemplate(StrictModel):
         return self
 
 
+class AmbientNightConfig(StrictModel):
+    enabled: StrictBool = True
+    chain_template: str
+
+
 class ChainFile(StrictModel):
     templates: dict[str, ChainTemplate]
     actions: dict[str, str] = Field(default_factory=dict)
+    ambient_night: AmbientNightConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -652,6 +658,7 @@ class FactorLibrary:
     factors: tuple[Factor, ...]
     templates: Mapping[str, ChainTemplate]
     actions: Mapping[str, str]
+    ambient_night: AmbientNightConfig | None = None
 
     def template_for(self, action_type: str) -> ChainTemplate | None:
         template_name = self.actions.get(action_type)
@@ -870,6 +877,14 @@ def load_library(content_dir: str | Path) -> FactorLibrary:
             raise ValueError(
                 f"{chains_path}: action {action_type}: unknown chain template {template_name!r}"
             )
+    if (
+        chain_file.ambient_night is not None
+        and chain_file.ambient_night.chain_template not in chain_file.templates
+    ):
+        raise ValueError(
+            f"{chains_path}: ambient_night references unknown chain template "
+            f"{chain_file.ambient_night.chain_template!r}"
+        )
 
     ordered_factors = tuple(sorted(factors, key=lambda factor: (factor.order, factor.id)))
     templates = MappingProxyType(dict(chain_file.templates))
@@ -878,6 +893,7 @@ def load_library(content_dir: str | Path) -> FactorLibrary:
         factors=ordered_factors,
         templates=templates,
         actions=actions,
+        ambient_night=chain_file.ambient_night,
     )
 
 

@@ -189,7 +189,7 @@ def test_stealth_reduces_gate_and_companions_reduce_encounter_chance():
 
     assert regular["noticed"].chance - stealth["noticed"].chance == pytest.approx(0.10)
     assert no_companions["encounter"].chance - one_companion["encounter"].chance == pytest.approx(0.05)
-    assert no_companions["encounter"].chance - three_companions["encounter"].chance == pytest.approx(0.12)
+    assert no_companions["encounter"].chance - three_companions["encounter"].chance == pytest.approx(0.10)
     assert extra_companions["encounter"].chance == three_companions["encounter"].chance
 
 
@@ -289,7 +289,7 @@ def test_plan_quality_changes_chance_and_zero_adds_no_plan_modifier():
 
     assert neutral["noticed"].chance - good["noticed"].chance == pytest.approx(0.27)
     assert bad["noticed"].chance - neutral["noticed"].chance == pytest.approx(0.30)
-    assert neutral["encounter"].chance - good["encounter"].chance == pytest.approx(0.24)
+    assert neutral["encounter"].chance - good["encounter"].chance == pytest.approx(0.22)
     assert bad["encounter"].chance - neutral["encounter"].chance == pytest.approx(0.30)
     assert all(
         modifier["source"] != "plan"

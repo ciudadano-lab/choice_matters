@@ -90,9 +90,15 @@ def run_chain(
     plan_quality: float = DEFAULT_PLAN_QUALITY,
     library: FactorLibrary | None = None,
     plan_features: PlanFeatures | None = None,
+    chain_template: str | None = None,
 ) -> ChainResult:
     active_library = library if library is not None else _DEFAULT_LIBRARY
-    template = active_library.template_for(action.actionType)
+    if chain_template is not None:
+        template = active_library.templates.get(chain_template)
+        if template is None:
+            raise ValueError(f"Unknown chain template {chain_template!r}")
+    else:
+        template = active_library.template_for(action.actionType)
     if template is None:
         return ChainResult([], None, 0.0, False, None)
 

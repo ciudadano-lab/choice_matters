@@ -162,15 +162,16 @@ def _record(result, name):
     return next(step for step in result.steps if step.name == name)
 
 
-def test_shipped_content_has_twenty_factor_records_nineteen_sources_and_four_templates():
+def test_shipped_content_has_twenty_factor_records_nineteen_sources_and_five_templates():
     library = get_library()
 
     assert {factor.id for factor in library.factors} == EXPECTED_FACTOR_IDS
     assert len(library.factors) == 20
     assert {factor.log_source or factor.id for factor in library.factors} == EXPECTED_LOG_SOURCES
-    assert len(library.templates) == 4
+    assert len(library.templates) == 5
     assert set(library.templates) == {
         "noticed_chain", "noise_chain", "travel_chain", "attack_chain",
+        "ambient_night_chain",
     }
     assert set(library.actions) == {
         "travel", "search", "scavenge", "gather", "build", "reinforce",

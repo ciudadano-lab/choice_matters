@@ -12,7 +12,7 @@
         {
           "name": "encounter",
           "kind": "encounter",
-          "base": 0.12,
+          "base": 0.10,
           "interrupt": true,
           "requires": "noticed"
         }
@@ -30,7 +30,7 @@
         {
           "name": "encounter",
           "kind": "encounter",
-          "base": 0.12,
+          "base": 0.10,
           "interrupt": true,
           "requires": "noise"
         }
@@ -48,7 +48,7 @@
         {
           "name": "encounter",
           "kind": "encounter",
-          "base": 0.12,
+          "base": 0.10,
           "interrupt": true,
           "requires": "route_hazard"
         }
@@ -64,6 +64,28 @@
           "requires": null
         }
       ]
+    },
+    "ambient_night_chain": {
+      "steps": [
+      {
+        "name": "ambient_noise",
+        "kind": "gate",
+        "base": 0.05,
+        "interrupt": false,
+        "requires": null
+      },
+      {
+        "name": "ambient_encounter",
+        "kind": "encounter",
+        "base": 0.05,
+        "interrupt": true,
+        "requires": "ambient_noise"
+      }
+      ]
     }
+  },
+  "ambient_night": {
+    "enabled": true,
+    "chain_template": "ambient_night_chain"
   }
 }

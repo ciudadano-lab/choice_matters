@@ -106,6 +106,7 @@ class SimulationEngine:
         "craft_repair",
         "forage",
         "failed_attempt",
+        "ambient_noise",
     }
 
     def __init__(self, seed: int | None = None) -> None:
@@ -358,6 +359,7 @@ class SimulationEngine:
             action.parameters.get("seed", self.seed),
             plan_quality=action.parameters.get("planQuality", DEFAULT_PLAN_QUALITY),
             plan_features=plan_features,
+            chain_template=action.parameters.get("chainTemplate"),
         )
 
         if action.actionType in self.POLICY_ACTIONS:
@@ -396,6 +398,8 @@ class SimulationEngine:
             result = self._resolve_send_mission(state, action, rng)
         elif action.actionType in _REGISTRY_ONLY_ACTIONS:
             result = self._resolve_registry_action(state, action, rng)
+        elif action.actionType == "ambient_noise":
+            result = self._empty_result(action, 0, {})
         else:
             result = self._resolve_establish_settlement(state, action, rng)
 

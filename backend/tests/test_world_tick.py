@@ -106,7 +106,12 @@ def test_world_tick_autopilot_resolves_policy_days_and_rolls_up_period():
     assert updated.currentDay == 4
     assert tick.last_period_outcome["periodDays"] == 3
     assert tick.last_period_outcome["daysResolved"] == 3
-    assert all(item["actionType"] == "gather" for item in tick.last_period_outcome["dailyOutcomes"])
+    primary_actions = [
+        item["actionType"]
+        for item in tick.last_period_outcome["dailyOutcomes"]
+        if not item.get("isAmbient")
+    ]
+    assert all(action_type == "gather" for action_type in primary_actions)
     assert any(event["type"] == "strategic_period_outcome" for event in updated.activeEvents)
 
 
@@ -176,7 +181,11 @@ def test_settlement_pivot_happens_once_then_infrastructure_follows_through():
     assert len(settlement_events) == 1
     assert len(updated.settlements) == 1
     assert tick.last_period_outcome["daysResolved"] == 3
-    assert [item["actionType"] for item in tick.last_period_outcome["dailyOutcomes"]] == [
+    assert [
+        item["actionType"]
+        for item in tick.last_period_outcome["dailyOutcomes"]
+        if not item.get("isAmbient")
+    ] == [
         "build",
         "build",
         "establish_settlement",
@@ -293,6 +302,21 @@ def test_time_slots_follow_expected_order_and_rollover():
     assert WorldTick.slot_name_for_time("18:00") == "dusk"
     assert WorldTick.slot_name_for_time("22:00") == "night"
 
+    slot_state = WorldState.from_dict({
+        "currentDay": 1,
+        "currentTime": "06:00",
+        "players": [],
+    })
+    slot_tick = WorldTick(seed=13)
+    observed_times = []
+    for _ in range(4):
+        slot_state = slot_tick.advance_slot(
+            slot_state, WorldEventQueue(), run_autopilot=False
+        )
+        observed_times.append(slot_state.currentTime)
+    assert observed_times == ["12:00", "18:00", "22:00", "06:00"]
+    assert slot_state.currentDay == 2
+
     world_state = WorldState.from_dict({
         "currentDay": 1,
         "currentTime": "22:00",
@@ -312,6 +336,136 @@ def test_time_slots_follow_expected_order_and_rollover():
     assert updated.currentTime == "06:00"
     assert updated.players[0]["stress"] <= 100
     assert updated.players[0]["hunger"] <= 100
+
+
+def test_policy_day_runs_night_action_at_2200_and_records_slot():
+    world_state = WorldState.from_dict({
+        "currentDay": 1,
+        "currentTime": "06:00",
+        "players": [{
+            "id": "player_1",
+            "location": "shelter",
+            "currentPolicy": {
+                "actionType": "personal_development",
+                "focus": "rest and recover",
+                "planFeatures": {"timing": "night"},
+            },
+        }],
+        "locations": [{"id": "shelter", "name": "Shelter", "type": "shelter"}],
+        "resources": {"food": 10, "water": 10},
+    })
+
+    tick = WorldTick(seed=13)
+    updated = tick.advance_policy_day(world_state, WorldEventQueue())
+
+    action_record = next(
+        record for record in tick.last_policy_day_outcomes
+        if record["playerId"] == "player_1" and not record.get("isAmbient")
+    )
+    assert action_record["slot"] == "night"
+    assert action_record["slotTime"] == "22:00"
+    assert updated.currentTime == "06:00"
+    assert updated.currentDay == 2
+
+
+def test_ambient_night_chain_runs_only_for_outdoors_players():
+    world_state = WorldState.from_dict({
+        "currentDay": 1,
+        "currentTime": "06:00",
+        "players": [
+            {"id": "outdoors", "location": "street"},
+            {"id": "sheltered", "location": "shelter"},
+            {"id": "fortified", "location": "fort"},
+        ],
+        "locations": [
+            {"id": "street", "name": "Street", "type": "street"},
+            {"id": "shelter", "name": "Shelter", "type": "shelter"},
+            {
+                "id": "fort",
+                "name": "Fort",
+                "flags": {"fortified": True},
+                "flagExpiries": {"fortified": 4},
+            },
+        ],
+        "resources": {"food": 10, "water": 10},
+    })
+    tick = WorldTick(seed=13)
+
+    tick.advance_policy_day(world_state, WorldEventQueue())
+
+    ambient_records = [
+        record for record in tick.last_policy_day_outcomes
+        if record.get("isAmbient")
+    ]
+    assert len(ambient_records) == 1
+    assert ambient_records[0]["playerId"] == "outdoors"
+    assert ambient_records[0]["slot"] == "night"
+    assert ambient_records[0]["slotTime"] == "22:00"
+
+
+def test_policy_day_runs_daily_upkeep_once_at_rollover(monkeypatch):
+    world_state = WorldState.from_dict({
+        "currentDay": 1,
+        "currentTime": "06:00",
+        "players": [{
+            "id": "player_1",
+            "location": "shelter",
+            "hunger": 25,
+            "thirst": 25,
+            "stress": 20,
+            "currentPolicy": {
+                "actionType": "personal_development",
+                "focus": "rest and recover",
+            },
+        }],
+        "locations": [{"id": "shelter", "name": "Shelter", "type": "shelter"}],
+        "resources": {"food": 10, "water": 10},
+    })
+    tick = WorldTick(seed=13)
+    advance = tick.advance
+    upkeep_calls = []
+
+    def track_advance(state, event_queue, **kwargs):
+        upkeep_calls.append(kwargs.get("hours"))
+        return advance(state, event_queue, **kwargs)
+
+    monkeypatch.setattr(tick, "advance", track_advance)
+    updated = tick.advance_policy_day(world_state, WorldEventQueue())
+
+    assert upkeep_calls == [8]
+    assert updated.currentDay == 2
+    assert updated.currentTime == "06:00"
+
+
+def test_policy_day_roll_logs_are_deterministic_for_same_seed():
+    world_state = WorldState.from_dict({
+        "currentDay": 1,
+        "currentTime": "06:00",
+        "players": [{
+            "id": "player_1",
+            "location": "school",
+            "currentPolicy": {
+                "actionType": "resource_policy",
+                "focus": "search for supplies",
+                "planFeatures": {"timing": "day"},
+            },
+        }],
+        "locations": [{
+            "id": "school",
+            "name": "School",
+            "discovered": True,
+            "dangerLevel": 3,
+            "zombiePopulation": 2,
+        }],
+        "resources": {"food": 10, "water": 10},
+    })
+
+    first_records = WorldTick(seed=271)
+    first_records.advance_policy_day(world_state, WorldEventQueue())
+    second_records = WorldTick(seed=271)
+    second_records.advance_policy_day(world_state, WorldEventQueue())
+
+    assert first_records.last_policy_day_outcomes == second_records.last_policy_day_outcomes
 
 
 def test_world_tick_advances_world_state_and_schedules_events():
