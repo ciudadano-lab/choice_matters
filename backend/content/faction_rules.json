@@ -1,0 +1,11 @@
+{
+  "goal_vocabulary": [
+    "stay_alive",
+    "secure_shelter",
+    "secure_supplies",
+    "control_trade_routes",
+    "protect_civilians"
+  ],
+  "faction_disposition_scale_factor": 5,
+  "surface_faction_events_to_active_events": true
+}

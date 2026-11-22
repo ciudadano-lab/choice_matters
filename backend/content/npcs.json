@@ -1,0 +1,100 @@
+{
+  "npcs": [
+    {
+      "id": "npc_mara_ellis",
+      "name": "Mara Ellis",
+      "role": "settlement_leader",
+      "faction_id": "faction_survivors",
+      "settlement_id": "settlement_westwood",
+      "traits": ["resourceful", "protective"],
+      "loyalty": 82,
+      "status": "alive",
+      "arc_id": null,
+      "arc_stage": 0
+    },
+    {
+      "id": "npc_sana_patell",
+      "name": "Sana Patell",
+      "role": "medic",
+      "faction_id": "faction_survivors",
+      "settlement_id": "settlement_westwood",
+      "traits": ["compassionate", "observant"],
+      "loyalty": 75,
+      "status": "alive",
+      "arc_id": null,
+      "arc_stage": 0
+    },
+    {
+      "id": "npc_tomas_vega",
+      "name": "Tomas Vega",
+      "role": "builder",
+      "faction_id": "faction_survivors",
+      "settlement_id": "settlement_westwood",
+      "traits": ["patient", "practical"],
+      "loyalty": 68,
+      "status": "alive",
+      "arc_id": null,
+      "arc_stage": 0
+    },
+    {
+      "id": "npc_eli_cross",
+      "name": "Eli Cross",
+      "role": "settlement_leader",
+      "faction_id": "faction_scavengers",
+      "settlement_id": "settlement_ironworks",
+      "traits": ["cautious", "resourceful"],
+      "loyalty": 70,
+      "status": "alive",
+      "arc_id": null,
+      "arc_stage": 0
+    },
+    {
+      "id": "npc_ren_okafor",
+      "name": "Ren Okafor",
+      "role": "scout",
+      "faction_id": "faction_scavengers",
+      "settlement_id": "settlement_ironworks",
+      "traits": ["curious", "independent"],
+      "loyalty": 61,
+      "status": "alive",
+      "arc_id": null,
+      "arc_stage": 0
+    },
+    {
+      "id": "npc_bea_moreno",
+      "name": "Bea Moreno",
+      "role": "quartermaster",
+      "faction_id": "faction_scavengers",
+      "settlement_id": "settlement_ironworks",
+      "traits": ["organized", "blunt"],
+      "loyalty": 66,
+      "status": "alive",
+      "arc_id": null,
+      "arc_stage": 0
+    },
+    {
+      "id": "npc_jonas_reed",
+      "name": "Jonas Reed",
+      "role": "settlement_leader",
+      "faction_id": "faction_watch",
+      "settlement_id": "settlement_beacon",
+      "traits": ["disciplined", "protective"],
+      "loyalty": 80,
+      "status": "alive",
+      "arc_id": null,
+      "arc_stage": 0
+    },
+    {
+      "id": "npc_imani_cole",
+      "name": "Imani Cole",
+      "role": "engineer",
+      "faction_id": "faction_watch",
+      "settlement_id": "settlement_beacon",
+      "traits": ["inventive", "direct"],
+      "loyalty": 72,
+      "status": "alive",
+      "arc_id": null,
+      "arc_stage": 0
+    }
+  ]
+}

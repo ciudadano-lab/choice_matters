@@ -8,6 +8,7 @@ from typing import Any
 
 from road_network import attach_location, generate_road_network
 from economy import get_starting_resources
+from world_content import WorldContent, load_world_content
 
 
 DEFAULT_LOCATION = {
@@ -36,6 +37,191 @@ def settlement_tier(population: int) -> int:
     if population <= 200:
         return 3
     return 4
+
+
+def normalize_settlement_record(
+    settlement: dict[str, Any],
+    content: WorldContent | None = None,
+) -> dict[str, Any]:
+    world_content = content or load_world_content()
+    defaults = world_content.settlements.defaults
+    normalized = copy.deepcopy(settlement)
+
+    location_id = normalized.get("location_id", normalized.get("location"))
+    if not isinstance(location_id, str):
+        location_id = None
+    normalized["location_id"] = location_id
+    normalized["location"] = location_id
+
+    population = _coerce_int(normalized.get("population"), 0)
+    normalized["population"] = max(0, population)
+    normalized["tier"] = settlement_tier(normalized["population"])
+
+    normalized.setdefault("coordinates", copy.deepcopy(defaults.coordinates))
+    if not isinstance(normalized["coordinates"], dict):
+        normalized["coordinates"] = copy.deepcopy(defaults.coordinates)
+    founded_day = normalized.get("founded_day", normalized.get("foundedDay", 1))
+    normalized["founded_day"] = max(1, _coerce_int(founded_day, 1))
+    normalized["foundedDay"] = normalized["founded_day"]
+
+    for stat in ("morale", "unrest", "defense"):
+        value = _coerce_int(normalized.get(stat), getattr(defaults, stat))
+        normalized[stat] = max(0, min(100, value))
+
+    stores = copy.deepcopy(defaults.stores)
+    raw_stores = normalized.get("stores")
+    if isinstance(raw_stores, dict):
+        for resource, value in raw_stores.items():
+            if isinstance(value, int):
+                stores[resource] = max(0, value)
+    normalized["stores"] = stores
+
+    allowed_statuses = {
+        "growing",
+        "stable",
+        "strained",
+        "starving",
+        "collapsing",
+        "abandoned",
+    }
+    status = normalized.get("status")
+    normalized["status"] = (
+        status
+        if isinstance(status, str) and status in allowed_statuses
+        else defaults.status
+    )
+    normalized.setdefault("faction_id", "faction_survivors")
+    normalized.setdefault("leader_npc_id", None)
+    normalized.setdefault("founderId", normalized.get("founder_id"))
+
+    normalized["needs"] = sorted(
+        resource
+        for resource, threshold in defaults.needs_thresholds.items()
+        if stores.get(resource, 0) <= threshold
+    )
+    return normalized
+
+
+def _stable_content_index(seed: int, namespace: str, size: int) -> int:
+    digest = hashlib.sha256(f"{seed}:{namespace}".encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) % size
+
+
+def _seed_world_entities(
+    seed: int,
+    players: list[dict[str, Any]],
+    locations: list[dict[str, Any]],
+    content: WorldContent,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    faction_ids = {faction.id for faction in content.factions.factions}
+    player_ids = sorted(
+        str(player["id"])
+        for player in players
+        if isinstance(player, dict) and player.get("id") is not None
+    )
+    factions: list[dict[str, Any]] = []
+    for faction_seed in sorted(content.factions.factions, key=lambda item: item.id):
+        territory = sorted(
+            location["id"]
+            for location in locations
+            if location.get("type") in faction_seed.territory_types
+            and isinstance(location.get("id"), str)
+        )
+        relationships = {
+            target_id: faction_seed.initial_dispositions[target_id]
+            for target_id in sorted(faction_ids - {faction_seed.id})
+        }
+        factions.append({
+            "id": faction_seed.id,
+            "name": faction_seed.name,
+            "population": faction_seed.population,
+            "strength": faction_seed.strength,
+            "militaryStrength": faction_seed.military_strength,
+            "resources": copy.deepcopy(faction_seed.resources),
+            "territory": territory,
+            "ideology": faction_seed.legacy_ideology,
+            "ideology_tags": list(faction_seed.ideology_tags),
+            "relationships": relationships,
+            "player_dispositions": {
+                player_id: faction_seed.player_disposition
+                for player_id in player_ids
+            },
+            "stances": {
+                target_id: faction_seed.initial_stances[target_id]
+                for target_id in sorted(faction_ids - {faction_seed.id})
+            },
+            "goals": list(faction_seed.goals),
+            "leader_npc_id": faction_seed.leader_npc_id,
+            "council_seats": faction_seed.council_seats,
+        })
+
+    used_locations: set[str] = set()
+    settlements: list[dict[str, Any]] = []
+    for settlement_seed in sorted(
+        content.settlements.settlements,
+        key=lambda item: item.id,
+    ):
+        candidates = sorted(
+            (
+                location
+                for location in locations
+                if location.get("type") == settlement_seed.location_type
+                and isinstance(location.get("id"), str)
+                and location["id"] not in used_locations
+            ),
+            key=lambda location: location["id"],
+        )
+        if not candidates:
+            raise ValueError(
+                f"No world location of type {settlement_seed.location_type!r} "
+                f"for settlement {settlement_seed.id!r}"
+            )
+        location_index = _stable_content_index(
+            seed,
+            f"settlement_location:{settlement_seed.id}",
+            len(candidates),
+        )
+        location = candidates[location_index]
+        location_id = location["id"]
+        used_locations.add(location_id)
+        settlement = {
+            "id": settlement_seed.id,
+            "name": settlement_seed.name,
+            "location_id": location_id,
+            "location": location_id,
+            "coordinates": copy.deepcopy(
+                location.get("coordinates", content.settlements.defaults.coordinates)
+            ),
+            "faction_id": settlement_seed.faction_id,
+            "leader_npc_id": settlement_seed.leader_npc_id,
+            "population": settlement_seed.population,
+            "morale": settlement_seed.morale,
+            "unrest": settlement_seed.unrest,
+            "defense": settlement_seed.defense,
+            "stores": copy.deepcopy(settlement_seed.stores),
+            "status": settlement_seed.status,
+            "founded_day": settlement_seed.founded_day,
+            "foundedDay": settlement_seed.founded_day,
+            "founderId": None,
+        }
+        settlements.append(normalize_settlement_record(settlement, content))
+
+    npcs = {
+        npc_seed.id: {
+            "id": npc_seed.id,
+            "name": npc_seed.name,
+            "role": npc_seed.role,
+            "faction_id": npc_seed.faction_id,
+            "settlement_id": npc_seed.settlement_id,
+            "traits": list(npc_seed.traits),
+            "loyalty": npc_seed.loyalty,
+            "status": npc_seed.status,
+            "arc_id": npc_seed.arc_id,
+            "arc_stage": npc_seed.arc_stage,
+        }
+        for npc_seed in sorted(content.npcs.npcs, key=lambda item: item.id)
+    }
+    return factions, settlements, npcs
 
 LOCATION_RESOURCE_PROFILES: dict[str, dict[str, tuple[int, int]]] = {
     "hospital": {"medical_supplies": (2, 6)},
@@ -932,22 +1118,17 @@ def materialize_emergent_location(world_state: "WorldState" | dict[str, Any], te
 
 
 def generate_initial_world_state(players: list[dict[str, Any]], seed: int) -> WorldState:
+    players = copy.deepcopy(players)
     geography = _generate_geography(seed)
     locations = _generate_locations(seed)
     poi_templates = _generate_poi_templates(seed)
-    factions = [
-        {
-            "id": "faction_survivors",
-            "name": "Local Survivors",
-            "population": max(1, len(players)),
-            "militaryStrength": 2,
-            "resources": {"water": 3, "food": 4, "medical_supplies": 1},
-            "territory": [loc["id"] for loc in locations if loc["type"] == "hospital" or loc["type"] == "school"],
-            "ideology": "survival",
-            "relationships": {},
-            "goals": ["stay alive", "find shelter"],
-        }
-    ]
+    content = load_world_content()
+    factions, settlements, npcs = _seed_world_entities(
+        seed,
+        players,
+        locations,
+        content,
+    )
     world = WorldState(
         currentTime="06:00",
         currentDay=1,
@@ -958,7 +1139,8 @@ def generate_initial_world_state(players: list[dict[str, Any]], seed: int) -> Wo
         players=players,
         factions=factions,
         seed=seed,
-        settlements=[],
+        settlements=settlements,
+        npcs=npcs,
         resources={},
         activeEvents=[],
         discoveredInformation=[],
@@ -970,7 +1152,6 @@ def generate_initial_world_state(players: list[dict[str, Any]], seed: int) -> Wo
         _ensure_player_entities(player)
     world.cityLayout = _generate_city_layout(seed)
     world.cityLayout["roadNetwork"] = generate_road_network(world.locations, seed, GRID_SIZE)
-    world.settlements = []
     world.emergentTemplates = _generate_emergent_templates(seed)
     world.poiTemplates = poi_templates
     if players:
@@ -1005,6 +1186,17 @@ def generate_initial_world_state(players: list[dict[str, Any]], seed: int) -> Wo
                 "knownNearbyLocations": spawn_info["knownNearbyLocations"],
                 "spawnSeed": spawn_info["spawnSeed"],
             })
+    player_disposition_by_faction = {
+        faction.id: faction.player_disposition
+        for faction in content.factions.factions
+    }
+    for faction in world.factions:
+        disposition = player_disposition_by_faction[faction["id"]]
+        faction["player_dispositions"] = {
+            str(player["id"]): disposition
+            for player in world.players
+            if isinstance(player, dict) and player.get("id") is not None
+        }
     world.resources = get_starting_resources(len(world.players))
     world.refresh_layers()
     return world
@@ -1082,6 +1274,7 @@ class WorldState:
     players: list[dict[str, Any]] = field(default_factory=list)
     factions: list[dict[str, Any]] = field(default_factory=list)
     settlements: list[dict[str, Any]] = field(default_factory=list)
+    npcs: dict[str, dict[str, Any]] = field(default_factory=dict)
     resources: dict[str, Any] = field(default_factory=dict)
     activeEvents: list[dict[str, Any]] = field(default_factory=list)
     discoveredInformation: list[dict[str, Any]] = field(default_factory=list)
@@ -1153,6 +1346,7 @@ class WorldState:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "WorldState":
+        raw = copy.deepcopy(raw)
         state = cls(
             currentTime=_coerce_str(raw.get("currentTime"), "00:00"),
             currentDay=_coerce_int(raw.get("currentDay"), 1),
@@ -1162,7 +1356,17 @@ class WorldState:
             locations=_coerce_list(raw.get("locations"), []),
             players=_coerce_list(raw.get("players"), []),
             factions=_coerce_list(raw.get("factions"), []),
-            settlements=_coerce_list(raw.get("settlements"), []),
+            settlements=[
+                normalize_settlement_record(item)
+                if isinstance(item, dict)
+                else item
+                for item in _coerce_list(raw.get("settlements"), [])
+            ],
+            npcs={
+                str(npc_id): copy.deepcopy(npc)
+                for npc_id, npc in _coerce_dict(raw.get("npcs"), {}).items()
+                if isinstance(npc, dict)
+            },
             resources=_coerce_dict(raw.get("resources"), {}),
             activeEvents=_coerce_list(raw.get("activeEvents"), []),
             discoveredInformation=_coerce_list(raw.get("discoveredInformation"), []),
@@ -1208,6 +1412,7 @@ class WorldState:
             "players": copy.deepcopy(self.players),
             "factions": copy.deepcopy(self.factions),
             "settlements": copy.deepcopy(self.settlements),
+            "npcs": copy.deepcopy(self.npcs),
             "resources": copy.deepcopy(self.resources),
             "activeEvents": copy.deepcopy(self.activeEvents),
             "discoveredInformation": copy.deepcopy(self.discoveredInformation),

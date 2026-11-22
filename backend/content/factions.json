@@ -1,0 +1,88 @@
+{
+  "factions": [
+    {
+      "id": "faction_survivors",
+      "name": "Local Survivors",
+      "legacy_ideology": "survival",
+      "ideology_tags": ["survival", "cooperation"],
+      "goals": ["stay_alive", "secure_shelter"],
+      "strength": 2,
+      "population": 12,
+      "military_strength": 2,
+      "resources": {
+        "water": 24,
+        "food": 30,
+        "medical_supplies": 4,
+        "building_materials": 8
+      },
+      "territory_types": ["hospital", "school"],
+      "initial_dispositions": {
+        "faction_scavengers": 10,
+        "faction_watch": 15
+      },
+      "initial_stances": {
+        "faction_scavengers": "friendly",
+        "faction_watch": "friendly"
+      },
+      "player_disposition": 0,
+      "leader_npc_id": "npc_mara_ellis",
+      "council_seats": 3
+    },
+    {
+      "id": "faction_scavengers",
+      "name": "East Market Collective",
+      "legacy_ideology": "resource_acquisition",
+      "ideology_tags": ["resourcefulness", "independence"],
+      "goals": ["secure_supplies", "control_trade_routes"],
+      "strength": 3,
+      "population": 9,
+      "military_strength": 3,
+      "resources": {
+        "water": 20,
+        "food": 28,
+        "medical_supplies": 2,
+        "building_materials": 6
+      },
+      "territory_types": ["warehouse", "supermarket"],
+      "initial_dispositions": {
+        "faction_survivors": 10,
+        "faction_watch": -10
+      },
+      "initial_stances": {
+        "faction_survivors": "friendly",
+        "faction_watch": "wary"
+      },
+      "player_disposition": 0,
+      "leader_npc_id": "npc_eli_cross",
+      "council_seats": 2
+    },
+    {
+      "id": "faction_watch",
+      "name": "Northside Watch",
+      "legacy_ideology": "security",
+      "ideology_tags": ["security", "order"],
+      "goals": ["protect_civilians", "secure_shelter"],
+      "strength": 2,
+      "population": 10,
+      "military_strength": 3,
+      "resources": {
+        "water": 22,
+        "food": 25,
+        "medical_supplies": 3,
+        "building_materials": 10
+      },
+      "territory_types": ["fire_station", "police_station"],
+      "initial_dispositions": {
+        "faction_survivors": 15,
+        "faction_scavengers": -10
+      },
+      "initial_stances": {
+        "faction_survivors": "friendly",
+        "faction_scavengers": "wary"
+      },
+      "player_disposition": 0,
+      "leader_npc_id": "npc_jonas_reed",
+      "council_seats": 2
+    }
+  ]
+}

@@ -1,0 +1,83 @@
+{
+  "defaults": {
+    "morale": 50,
+    "unrest": 0,
+    "defense": 20,
+    "stores": {
+      "food": 0,
+      "water": 0,
+      "building_materials": 0,
+      "medical_supplies": 0
+    },
+    "coordinates": {
+      "x": 0,
+      "y": 0
+    },
+    "status": "stable",
+    "needs_thresholds": {
+      "food": 5,
+      "water": 5,
+      "building_materials": 2,
+      "medical_supplies": 1
+    }
+  },
+  "settlements": [
+    {
+      "id": "settlement_westwood",
+      "name": "Westwood Haven",
+      "location_type": "school",
+      "faction_id": "faction_survivors",
+      "leader_npc_id": "npc_mara_ellis",
+      "population": 24,
+      "morale": 64,
+      "unrest": 12,
+      "defense": 35,
+      "stores": {
+        "food": 28,
+        "water": 24,
+        "building_materials": 10,
+        "medical_supplies": 5
+      },
+      "status": "stable",
+      "founded_day": 1
+    },
+    {
+      "id": "settlement_ironworks",
+      "name": "Ironworks Exchange",
+      "location_type": "warehouse",
+      "faction_id": "faction_scavengers",
+      "leader_npc_id": "npc_eli_cross",
+      "population": 18,
+      "morale": 56,
+      "unrest": 24,
+      "defense": 30,
+      "stores": {
+        "food": 22,
+        "water": 20,
+        "building_materials": 16,
+        "medical_supplies": 3
+      },
+      "status": "stable",
+      "founded_day": 1
+    },
+    {
+      "id": "settlement_beacon",
+      "name": "Beacon Post",
+      "location_type": "fire_station",
+      "faction_id": "faction_watch",
+      "leader_npc_id": "npc_jonas_reed",
+      "population": 20,
+      "morale": 60,
+      "unrest": 15,
+      "defense": 48,
+      "stores": {
+        "food": 25,
+        "water": 22,
+        "building_materials": 12,
+        "medical_supplies": 4
+      },
+      "status": "stable",
+      "founded_day": 1
+    }
+  ]
+}
