@@ -1,0 +1,16 @@
+{
+  "id": "defend",
+  "action_type": "defend",
+  "label": "Defend",
+  "category": "tactical",
+  "chain_template": "noticed_chain",
+  "time_cost": 1,
+  "required_inputs": [],
+  "effects": [
+    {"type": "change_stat", "stat": "stress", "amount": -2},
+    {"type": "change_stat", "stat": "health", "amount": 0}
+  ],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Prepare to defend a position."
+}

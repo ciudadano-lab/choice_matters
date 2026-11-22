@@ -1,0 +1,13 @@
+{
+  "id": "diplomatic_stance",
+  "action_type": "diplomatic_stance",
+  "label": "Diplomatic stance",
+  "category": "policy",
+  "chain_template": "noticed_chain",
+  "time_cost": 0,
+  "required_inputs": ["focus"],
+  "effects": [],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Policy action for diplomacy, trade, and negotiation."
+}

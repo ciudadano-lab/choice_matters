@@ -1,0 +1,61 @@
+{
+  "starting_resources": {
+    "food": 15,
+    "water": 15,
+    "medical_supplies": 2,
+    "building_materials": 3
+  },
+  "resource_caps": {
+    "food": 40,
+    "water": 40,
+    "medical_supplies": 20,
+    "building_materials": 20
+  },
+  "daily_food_consumption_per_player": 1,
+  "daily_water_consumption_per_player": 1,
+  "health_regen_per_day": 1,
+  "health_regen_min_food": 3,
+  "health_regen_min_water": 3,
+  "starvation_health_loss_per_day": 8,
+  "dehydration_health_loss_per_day": 10,
+  "empty_food_satiety_loss_per_day": 4,
+  "empty_water_satiety_loss_per_day": 4,
+  "fed_satiety_recovery_per_day": 1,
+  "rest_health_recovery": 8,
+  "location_yields": {
+    "apartment": {"food": 1, "water": 1},
+    "barn": {"food": 3, "water": 1},
+    "campground": {"food": 1, "water": 1},
+    "clinic": {"food": 1, "water": 2},
+    "farm": {"food": 3, "water": 2},
+    "garage": {"food": 1, "water": 2},
+    "market": {"food": 2, "water": 2},
+    "nature_trail": {"food": 2, "water": 1},
+    "school": {"food": 1, "water": 1},
+    "supermarket": {"food": 2, "water": 2},
+    "default": {"food": 1, "water": 1}
+  },
+  "yield_actions": {
+    "search": {
+      "default": {"food": 2, "water": 2}
+    },
+    "scavenge": {
+      "default": {"food": 1, "water": 1}
+    },
+    "gather": {
+      "default": {"food": 1, "water": 1},
+      "farm": {"food": 2, "water": 1},
+      "nature_trail": {"food": 2, "water": 1}
+    },
+    "forage": {
+      "default": {"food": 1, "water": 0},
+      "farm": {"food": 2, "water": 0},
+      "nature_trail": {"food": 2, "water": 0}
+    }
+  },
+  "spoilage": {
+    "enabled": false,
+    "food_per_day": 0,
+    "water_per_day": 0
+  }
+}

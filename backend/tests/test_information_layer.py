@@ -166,3 +166,32 @@ def test_information_layer_progresses_map_reveal_state():
     )
     final_view = layer.get_map_reveal_state(world_state, player_id="player_1")
     assert final_view["revealedApproximateLocations"] is True
+
+
+def test_information_layer_resolves_name_in_id_keyed_location_mapping():
+    state = {
+        "currentDay": 1,
+        "locations": {
+            "location_clinic": {
+                "name": "Clinic",
+                "knownInformation": [],
+                "visibleState": {"status": "unknown"},
+            },
+        },
+    }
+
+    InformationLayer().apply_information(
+        state,
+        {
+            "source": "direct_observation",
+            "reliability": 0.8,
+            "timestamp": 1,
+            "confidence": 0.8,
+            "content": "The clinic is occupied.",
+        },
+        target_location="cLiNiC",
+    )
+
+    assert state["locations"]["location_clinic"]["knownInformation"][0]["content"] == (
+        "The clinic is occupied."
+    )

@@ -1,0 +1,79 @@
+[
+  {
+    "id": "items_in_hand",
+    "order": 100,
+    "label": "Items in hand",
+    "category": "preparation",
+    "kind": "plan",
+    "role": "counter",
+    "applies_to": {"step_kinds": ["encounter"]},
+    "calc": {
+      "type": "linear",
+      "input": "plan.owned_item_ratio",
+      "per_unit": 0.03,
+      "unit_size": 1,
+      "floor": false
+    },
+    "explanation": "You brought what the plan needs.",
+    "status": "live",
+    "source": "human"
+  },
+  {
+    "id": "missing_items",
+    "order": 101,
+    "label": "Missing items",
+    "category": "preparation",
+    "kind": "plan",
+    "role": "modifier",
+    "applies_to": {"step_kinds": ["gate", "encounter"]},
+    "calc": {
+      "type": "linear",
+      "input": "plan.missing_item_ratio",
+      "per_unit": 0.04,
+      "unit_size": 1,
+      "floor": false
+    },
+    "explanation": "The plan needs items you do not have.",
+    "status": "live",
+    "source": "human"
+  },
+  {
+    "id": "fallback_plan",
+    "order": 102,
+    "label": "Fallback plan",
+    "category": "preparation",
+    "kind": "plan",
+    "role": "counter",
+    "applies_to": {"step_kinds": ["encounter"]},
+    "calc": {
+      "type": "threshold",
+      "input": "plan.has_fallback",
+      "op": "eq",
+      "value": true,
+      "delta": 0.03
+    },
+    "explanation": "You have a way out if it goes wrong.",
+    "status": "live",
+    "source": "human"
+  },
+  {
+    "id": "countermeasures",
+    "order": 103,
+    "label": "Countermeasures",
+    "category": "preparation",
+    "kind": "plan",
+    "role": "counter",
+    "applies_to": {"step_kinds": ["encounter"]},
+    "calc": {
+      "type": "linear",
+      "input": "plan.countermeasure_count",
+      "per_unit": 0.02,
+      "unit_size": 1,
+      "floor": true,
+      "max_units": 2
+    },
+    "explanation": "You prepared specific countermeasures.",
+    "status": "live",
+    "source": "human"
+  }
+]

@@ -1,0 +1,13 @@
+{
+  "id": "communicate",
+  "action_type": "communicate",
+  "label": "Communicate",
+  "category": "social",
+  "chain_template": "noticed_chain",
+  "time_cost": 1,
+  "required_inputs": [],
+  "effects": [{"type": "change_stat", "stat": "stress", "amount": -1}],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Exchange messages with nearby survivors."
+}

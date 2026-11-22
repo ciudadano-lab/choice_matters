@@ -13,17 +13,19 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from world_state import WorldState, assign_spawn_to_player
+from action_registry import get_live_action_ids
 
 VALID_PLAYERS = [1, 2, 3]
 
 STRATEGIC_PERIOD_DAYS = 21
-POLICY_ACTION_TYPES = (
+_POLICY_PRIORITY = (
     "resource_policy",
     "diplomatic_stance",
     "infrastructure_investment",
     "population_policy",
     "personal_development",
 )
+POLICY_ACTION_TYPES = tuple(get_live_action_ids(category="policy", priority=list(_POLICY_PRIORITY))) or _POLICY_PRIORITY
 TACTICAL_ACTION_TYPES = (
     "travel",
     "search",
@@ -31,6 +33,7 @@ TACTICAL_ACTION_TYPES = (
     "gather",
     "build",
     "reinforce",
+    "fortify",
     "rest",
     "communicate",
     "negotiate",

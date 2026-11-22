@@ -1,0 +1,17 @@
+{
+  "id": "establish_settlement",
+  "action_type": "establish_settlement",
+  "label": "Establish settlement",
+  "category": "utility",
+  "chain_template": "noticed_chain",
+  "time_cost": 1,
+  "required_inputs": ["location"],
+  "effects": [
+    {"type": "change_resource", "resource": "food", "amount": -2},
+    {"type": "change_resource", "resource": "water", "amount": -1},
+    {"type": "change_stat", "stat": "stress", "amount": -1}
+  ],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Found or expand a settlement."
+}

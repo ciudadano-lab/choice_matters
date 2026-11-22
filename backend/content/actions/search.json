@@ -1,0 +1,13 @@
+{
+  "id": "search",
+  "action_type": "search",
+  "label": "Search",
+  "category": "tactical",
+  "chain_template": "noticed_chain",
+  "time_cost": 1,
+  "required_inputs": ["location"],
+  "effects": [{"type": "change_stat", "stat": "stress", "amount": 2}],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Search for supplies and intelligence."
+}

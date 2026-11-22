@@ -1,0 +1,41 @@
+[
+  {
+    "id": "active_status_effects",
+    "order": 20,
+    "label": "Active status effects",
+    "category": "player_condition",
+    "kind": "situation",
+    "role": "modifier",
+    "applies_to": {"step_kinds": ["encounter"]},
+    "calc": {
+      "type": "threshold",
+      "input": "actor.active_status_effect_count",
+      "op": "gte",
+      "value": 1,
+      "delta": 0.1
+    },
+    "explanation": "Existing injuries or conditions make hostile encounters harder to avoid.",
+    "status": "live",
+    "source": "human"
+  },
+  {
+    "id": "stress",
+    "order": 30,
+    "label": "Actor stress",
+    "category": "player_condition",
+    "kind": "situation",
+    "role": "modifier",
+    "applies_to": {"step_kinds": ["encounter"]},
+    "calc": {
+      "type": "linear",
+      "input": "actor.stress",
+      "per_unit": 0.05,
+      "unit_size": 40,
+      "floor": true,
+      "clamp_min": 0
+    },
+    "explanation": "High stress makes it harder to avoid hostile encounters.",
+    "status": "live",
+    "source": "human"
+  }
+]

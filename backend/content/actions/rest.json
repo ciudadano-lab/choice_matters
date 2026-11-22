@@ -1,0 +1,16 @@
+{
+  "id": "rest",
+  "action_type": "rest",
+  "label": "Rest",
+  "category": "tactical",
+  "chain_template": "noise_chain",
+  "time_cost": 1,
+  "required_inputs": [],
+  "effects": [
+    {"type": "change_stat", "stat": "stamina", "amount": 10},
+    {"type": "change_stat", "stat": "stress", "amount": -3}
+  ],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Recovery action with minimal risk."
+}

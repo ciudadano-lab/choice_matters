@@ -1,0 +1,16 @@
+{
+  "id": "attack",
+  "action_type": "attack",
+  "label": "Attack",
+  "category": "tactical",
+  "chain_template": "attack_chain",
+  "time_cost": 1,
+  "required_inputs": [],
+  "effects": [
+    {"type": "change_resource", "resource": "food", "amount": -1},
+    {"type": "change_stat", "stat": "stress", "amount": 4}
+  ],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Resolve a hostile attack."
+}

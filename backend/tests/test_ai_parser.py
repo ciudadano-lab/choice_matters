@@ -1,5 +1,15 @@
+import json
+
 from game_data import build_system_prompt, fresh_room_state
-from main import _build_action_from_payload, _build_ai_action_parse_prompt, _parse_json_payload, _resolved_target_slot, parse_reply
+import main
+from main import (
+    _build_action_from_payload,
+    _build_ai_action_parse_prompt,
+    _log_player_command_parse,
+    _parse_json_payload,
+    _resolved_target_slot,
+    parse_reply,
+)
 
 
 def test_phase_a_prompt_exposes_policy_taxonomy_and_strategic_cadence():
@@ -10,6 +20,10 @@ def test_phase_a_prompt_exposes_policy_taxonomy_and_strategic_cadence():
     assert "resource_policy|diplomatic_stance|infrastructure_investment|population_policy|personal_development" in prompt
     assert "21 days (three weeks)" in prompt
     assert '"policy"' in prompt
+    assert '"planFeatures"' in prompt
+    assert "Facts only" in prompt
+    assert "Do NOT judge or score the plan" in prompt
+    assert "targetLocationIds must come from the available location ids" in prompt
     assert '"pivotalTiming": "immediate|culmination"' in prompt
     assert "When ambiguous, use `culmination`" in prompt
     assert "travel|search|gather" not in prompt
@@ -77,6 +91,71 @@ def test_policy_narration_prompt_uses_strategic_period_context():
 
     assert "strategic policy commitment covering 21 days" in prompt
     assert "Prior strategic-period result" in prompt
+
+
+def test_narration_prompt_explains_plan_reasons_without_numbers():
+    room_state = fresh_room_state(seed=404)
+    from simulation_engine import SimulationResult, StructuredAction
+
+    action = StructuredAction(
+        "policy-plan-reasons",
+        "resource_policy",
+        "player_1",
+        "settlement",
+        parameters={"policy": {"focus": "scouting", "commitmentDays": 21}},
+    )
+    result = SimulationResult(
+        actionId="policy-plan-reasons", actionType="resource_policy", timeConsumed=0,
+        resourceChanges={}, playerStatusChanges=[], locationChanges=[],
+        encounterProbability=0.0, encounterOccurred=False, encounterDetails={},
+        factionRelationshipChanges=[], informationDiscovered=[], worldEventsTriggered=[],
+        updatedWorldState=room_state["world_state"],
+        planReasons=[{
+            "factor": "known_target_locations",
+            "effect": "helps",
+            "explanation": "You planned around places you actually know.",
+        }],
+    )
+
+    from main import _build_ai_narration_prompt
+
+    prompt = _build_ai_narration_prompt(1, room_state, action, result, "Plan the scouting")
+
+    assert "planFactors: helps: You planned around places you actually know." in prompt
+    assert "reflect why the plan helped or hurt without quoting numbers" in prompt
+
+
+def test_player_command_parse_log_is_one_json_line_with_complete_details(monkeypatch):
+    from simulation_engine import StructuredAction
+
+    log_lines = []
+    monkeypatch.setattr(main, "append_debug_log", log_lines.append)
+    action = StructuredAction(
+        "fallback-1",
+        "resource_policy",
+        "player_1",
+        "settlement",
+        parameters={"policy": {"focus": "barricade the door"}},
+    )
+
+    _log_player_command_parse(
+        "ABCD",
+        1,
+        "  barricade the door\nplease  ",
+        '{"invalid":\n"json"}',
+        action,
+        True,
+        "AI parse returned invalid JSON payload.",
+    )
+
+    assert len(log_lines) == 1
+    record = json.loads(log_lines[0])
+    assert record["player_text"] == "  barricade the door\nplease  "
+    assert record["raw_llm_output"] == '{"invalid":\n"json"}'
+    assert record["action_used"]["actionType"] == "resource_policy"
+    assert record["action_used"]["parameters"]["policy"]["focus"] == "barricade the door"
+    assert record["fallback_used"] is True
+    assert record["fallback_reason"] == "AI parse returned invalid JSON payload."
 
 
 def test_system_prompt_includes_compressed_story_summary():

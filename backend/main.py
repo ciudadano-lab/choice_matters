@@ -20,6 +20,8 @@ BACKEND_DIR = Path(__file__).resolve().parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+from action_registry import get_prompt_action_types
+from economy import apply_action_yield
 from env_config import load_backend_env
 from game_data import (
     POLICY_ACTION_TYPES,
@@ -33,6 +35,7 @@ from llm_client import call_narrator
 from narrator import narrate_simulation_result
 from relationships import RelationshipSystem
 from rooms_store import _seed_from_code, init_db, create_room, get_room, save_room, room_exists, normalize_room_state
+from plan_features import PlanFeatures
 from simulation_engine import SimulationEngine, StructuredAction
 from world_state import WorldState
 from world_tick import WorldTick, WorldEventQueue
@@ -52,6 +55,39 @@ def append_debug_log(message: str) -> None:
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(f"[{timestamp}] {message}\n")
+
+
+def _log_player_command_parse(
+    room_code: str,
+    slot: int,
+    player_text: str,
+    raw_llm_output: str | None,
+    action: StructuredAction,
+    fallback_used: bool,
+    fallback_reason: str | None,
+) -> None:
+    record = {
+        "event": "player_command_parse",
+        "room": room_code,
+        "slot": slot,
+        "player_text": player_text,
+        "raw_llm_output": raw_llm_output,
+        "action_used": {
+            "actionId": action.actionId,
+            "actionType": action.actionType,
+            "actor": action.actor,
+            "target": action.target,
+            "parameters": action.parameters,
+            "timeCost": action.timeCost,
+            "resourceCost": action.resourceCost,
+            "risks": action.risks,
+            "prerequisites": action.prerequisites,
+        },
+        "fallback_used": fallback_used,
+        "fallback_reason": fallback_reason,
+    }
+    append_debug_log(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -379,7 +415,7 @@ def _build_ai_action_parse_prompt(player_num: int, actor_id: str, room_state: di
         if isinstance(event, dict) and event.get("summary")
     ) if pending_events else "(none)"
 
-    action_types = "|".join(POLICY_ACTION_TYPES)
+    action_types = get_prompt_action_types(include_policy_only=True)
     return f"""You are a structured-action parser for a zombie survival sandbox.
 The current player is Player {player_num}.
 Strategic cadence: one policy decision normally covers {STRATEGIC_PERIOD_DAYS} days (three weeks). Choose one policy category and state its concrete focus. Tactical actions are internal simulation details and must not be returned as the player's action type.
@@ -410,11 +446,22 @@ Return exactly one fenced JSON code block and nothing else. The block must conta
     }},
     "timeCost": 1,
     "resourceCost": {{ }},
-    "policy": {{ "focus": "string", "commitmentDays": {STRATEGIC_PERIOD_DAYS}, "pivotalTiming": "immediate|culmination" }}
+    "policy": {{ "focus": "string", "commitmentDays": {STRATEGIC_PERIOD_DAYS}, "pivotalTiming": "immediate|culmination" }},
+    "planFeatures": {{
+    "targetLocationIds": [],
+    "peopleMentioned": [],
+    "itemsPlanned": [],
+    "timing": "unspecified",
+    "approach": "unspecified",
+    "countermeasures": [],
+    "hasFallback": false
+  }}
 }}
 ```
 Include `targetEntity` only when the action specifically names another player's companion or possession; otherwise omit it entirely or leave it `null`. Never emit an empty placeholder object for an action without an entity claim.
-Use `policy.focus` to state the concrete priority or stance and `policy.commitmentDays` for the intended commitment length. Use `policy.pivotalTiming` as `immediate` when the focus describes an action happening right away, such as attacking or traveling immediately. Use `culmination` when the focus describes building toward an outcome over the commitment, such as gathering resources before founding a settlement. When ambiguous, use `culmination`. Use only the available location ids for the target. Do not include any explanation, narrative, or text before or after the fenced JSON block."""
+Use `policy.focus` to state the concrete priority or stance and `policy.commitmentDays` for the intended commitment length. Use `policy.pivotalTiming` as `immediate` when the focus describes an action happening right away, such as attacking or traveling immediately. Use `culmination` when the focus describes building toward an outcome over the commitment, such as gathering resources before founding a settlement. When ambiguous, use `culmination`. Use only the available location ids for the target.
+For planFeatures: Facts only. List only what the player's text explicitly says; Do NOT judge or score the plan. Use [] / false / "unspecified" when something is not stated. targetLocationIds must come from the available location ids.
+Do not include any explanation, narrative, or text before or after the fenced JSON block."""
 
 
 def _build_action_from_payload(payload: Any) -> tuple[StructuredAction | None, str | None]:
@@ -437,16 +484,31 @@ def _build_action_from_payload(payload: Any) -> tuple[StructuredAction | None, s
         action_type = str(payload["actionType"]).strip().casefold()
         if action_type not in POLICY_ACTION_TYPES:
             return None, "Player-facing actions must use a strategic policy category."
+        parameters = payload.get("parameters")
+        if not isinstance(parameters, dict):
+            parameters = {}
+        parameters = {
+            key: value
+            for key, value in parameters.items()
+            if key not in {"seed", "planQuality", "planFeatures"}
+        }
+        raw_policy = payload.get("policy")
+        if not isinstance(raw_policy, dict):
+            raw_policy = parameters.get("policy")
+        policy = dict(raw_policy) if isinstance(raw_policy, dict) else {}
+        policy.pop("planFeatures", None)
+        plan_features = PlanFeatures.from_untrusted(payload.get("planFeatures"))
+        if plan_features is not None:
+            policy["planFeatures"] = plan_features.to_dict()
+        if policy or plan_features is not None:
+            parameters["policy"] = policy
         return (
             StructuredAction(
                 actionId=str(payload["actionId"]),
                 actionType=action_type,
                 actor=str(payload["actor"]),
                 target=str(payload["target"]),
-                parameters={
-                    **(payload.get("parameters") or {}),
-                    **({"policy": payload["policy"]} if isinstance(payload.get("policy"), dict) else {}),
-                },
+                parameters=parameters,
                 timeCost=int(payload.get("timeCost", 1)),
                 resourceCost={k: int(v) for k, v in (payload.get("resourceCost") or {}).items()},
             ),
@@ -543,6 +605,29 @@ def _build_ai_narration_prompt(player_num: int, room_state: dict, action: Struct
         f"informationDiscovered: {result.informationDiscovered}",
         f"worldEventsTriggered: {result.worldEventsTriggered}",
     ]
+    plan_reasons = getattr(result, "planReasons", [])
+    if plan_reasons:
+        result_lines.append(
+            "planFactors: "
+            + "; ".join(
+                f"{reason['effect']}: {reason['explanation']}"
+                for reason in plan_reasons
+            )
+        )
+    encounter_outcome = getattr(result, "encounterOutcome", None)
+    if isinstance(encounter_outcome, dict):
+        outcome_reasons = encounter_outcome.get("reasons", [])
+        result_lines.append(
+            f"encounterOutcome: {encounter_outcome.get('outcome', 'resolved')}"
+        )
+        if outcome_reasons:
+            result_lines.append(
+                "encounterFactors: "
+                + "; ".join(
+                    f"{reason['effect']}: {reason['explanation']}"
+                    for reason in outcome_reasons
+                )
+            )
     result_summary = "\n".join(result_lines)
     prompt_lines = []
     if result.physicallyImpossible:
@@ -559,6 +644,15 @@ def _build_ai_narration_prompt(player_num: int, room_state: dict, action: Struct
             "success = solid success, partial_success = mixed result with notable trade-offs, "
             "failure = clear setback, critical_failure = severe loss or collapse."
         )
+        prompt_lines.append(
+            "When planFactors are present, let the story reflect why the plan helped "
+            "or hurt without quoting numbers."
+        )
+        if isinstance(encounter_outcome, dict):
+            prompt_lines.append(
+                "The encounterOutcome and encounterFactors are settled by the simulation. "
+                "Narrate that outcome and why the factors helped or hurt without quoting numbers."
+            )
         if action.actionType in SimulationEngine.POLICY_ACTIONS:
             policy = action.parameters.get("policy", {})
             commitment_days = policy.get("commitmentDays", STRATEGIC_PERIOD_DAYS) if isinstance(policy, dict) else STRATEGIC_PERIOD_DAYS
@@ -574,6 +668,34 @@ def _build_ai_narration_prompt(player_num: int, room_state: dict, action: Struct
                     "Prior strategic-period result and accumulated developments are settled context: "
                     f"{prior_period}. Do not contradict them."
                 )
+                daily_outcomes = prior_period.get("dailyOutcomes", [])
+                period_encounters = [
+                    item
+                    for item in daily_outcomes
+                    if isinstance(item, dict)
+                    and isinstance(item.get("encounterOutcome"), dict)
+                ] if isinstance(daily_outcomes, list) else []
+                if period_encounters:
+                    encounter_lines = []
+                    for item in period_encounters:
+                        settled = item["encounterOutcome"]
+                        reasons = settled.get("reasons", [])
+                        reason_text = "; ".join(
+                            f"{'helps' if reason.get('effect') == 'helps' else 'hurts'}: "
+                            f"{reason.get('explanation')}"
+                            for reason in reasons
+                            if isinstance(reason, dict) and reason.get("explanation")
+                        )
+                        encounter_lines.append(
+                            f"day {item.get('day')}: {settled.get('outcome')}"
+                            + (f" ({reason_text})" if reason_text else "")
+                        )
+                    result_lines.append("encounterOutcomes: " + " | ".join(encounter_lines))
+                    result_summary = "\n".join(result_lines)
+                    prompt_lines.append(
+                        "These encounter outcomes and factors are settled; let the story "
+                        "reflect their consequences without quoting numbers."
+                    )
         social_outcome = getattr(result, 'socialOutcome', None) or {}
         if social_outcome.get("reaction"):
             prompt_lines.append(
@@ -787,6 +909,9 @@ async def _run_round(room_code: str, decisions: dict[int, str]) -> None:
                         "type": "decision",
                         "slot": slot,
                         "text": decisions[slot].get("text", "wait and observe"),
+                        "original_text": decisions[slot].get(
+                            "original_text", decisions[slot].get("text", "wait and observe")
+                        ),
                         "target_slot": decisions[slot].get("target"),
                         "defer_period_tick": True,
                     },
@@ -848,7 +973,8 @@ async def _advance_policy_period(room_code: str) -> None:
 
 async def handle_decision(room_code: str, websocket: WebSocket, msg: dict):
     slot = manager.slot_for(room_code, websocket)
-    text = (msg.get("text") or "").strip()
+    player_text = msg.get("text") or ""
+    text = player_text.strip()
     requested_slot = msg.get("slot")
     if slot is None:
         await websocket.send_json({"type": "error", "message": "Claim a player slot before playing."})
@@ -879,6 +1005,7 @@ async def handle_decision(room_code: str, websocket: WebSocket, msg: dict):
             return
         pending[str(slot)] = {
             "text": text,
+            "original_text": player_text,
             "target": target_slot,
             "round": int(state.get("roundNumber", 1)),
         }
@@ -911,6 +1038,7 @@ async def handle_decision(room_code: str, websocket: WebSocket, msg: dict):
 async def _process_decision(room_code: str, websocket: WebSocket, msg: dict):
     slot = manager.slot_for(room_code, websocket)
     text = (msg.get("text") or "").strip()
+    player_text = msg.get("original_text", msg.get("text") or "")
     requested_slot = msg.get("slot")
 
     if slot is None:
@@ -944,6 +1072,7 @@ async def _process_decision(room_code: str, websocket: WebSocket, msg: dict):
     action = None
     parse_error = None
     parse_raw_response = None
+    raw_parse_response = None
     if text.casefold() == "wait and observe":
         action = StructuredAction(
             actionId=f"wait-and-observe-{slot}-{snapshot.get('roundNumber', 1)}",
@@ -960,16 +1089,16 @@ async def _process_decision(room_code: str, websocket: WebSocket, msg: dict):
         )
     else:
         try:
-            raw_parse = await call_narrator(ai_parse_prompt, "", purpose="parse")
-            payload = _parse_json_payload(raw_parse)
+            raw_parse_response = await call_narrator(ai_parse_prompt, "", purpose="parse")
+            payload = _parse_json_payload(raw_parse_response)
             action, parse_error = _build_action_from_payload(payload)
         except RuntimeError as exc:
             parse_error = str(exc)
             parse_raw_response = getattr(exc, "raw_response", None)
-            append_debug_log(f"AI parse error for room={room_code} slot={slot}: {parse_error}")
+            raw_parse_response = parse_raw_response
 
     fallback_used = False
-    fallback_error = None
+    fallback_reason = None
     if action is None:
         action = StructuredAction(
             actionId=f"policy-fallback-{slot}-{snapshot.get('roundNumber', 1)}",
@@ -985,6 +1114,17 @@ async def _process_decision(room_code: str, websocket: WebSocket, msg: dict):
             },
         )
         fallback_used = True
+        fallback_reason = parse_error or "AI parse did not produce a usable action."
+
+    _log_player_command_parse(
+        room_code,
+        slot,
+        player_text,
+        raw_parse_response,
+        action,
+        fallback_used,
+        fallback_reason,
+    )
 
     summary_text = None
     next_turn = int(snapshot_player.get("turnCount", 0)) + 1
@@ -1008,6 +1148,17 @@ async def _process_decision(room_code: str, websocket: WebSocket, msg: dict):
         narration_room_state["worldEra"] = summary_text
 
     preview_result = SimulationEngine(seed=_seed_from_code(room_code)).apply(snapshot_world, action)
+    preview_engine = SimulationEngine(seed=_seed_from_code(room_code))
+    preview_engine.apply_rest_recovery(preview_result, action.actor)
+    apply_action_yield(snapshot_world, preview_result, action)
+    preview_tick = WorldTick(seed=_seed_from_code(room_code))
+    if preview_result.encounterOccurred:
+        preview_tick.resolve_encounter_after_action(
+            snapshot_world,
+            preview_result,
+            action,
+            seed=_seed_from_code(room_code),
+        )
     period_preview = None
     if action.actionType in SimulationEngine.POLICY_ACTIONS:
         policy = action.parameters.get("policy", {})
@@ -1018,7 +1169,6 @@ async def _process_decision(room_code: str, websocket: WebSocket, msg: dict):
             else STRATEGIC_PERIOD_DAYS,
         )
         preview_world = WorldState.from_dict(preview_result.updatedWorldState)
-        preview_tick = WorldTick(seed=_seed_from_code(room_code))
         period_preview = preview_tick.advance(
             preview_world,
             WorldEventQueue(),
@@ -1093,7 +1243,17 @@ async def _process_decision(room_code: str, websocket: WebSocket, msg: dict):
 
         world_state = WorldState.from_room_state(state)
         previous_day = world_state.currentDay
-        result = SimulationEngine(seed=_seed_from_code(room_code)).apply(world_state, action)
+        engine = SimulationEngine(seed=_seed_from_code(room_code))
+        result = engine.apply(world_state, action)
+        engine.apply_rest_recovery(result, action.actor)
+        apply_action_yield(world_state, result, action)
+        if result.encounterOccurred:
+            WorldTick(seed=_seed_from_code(room_code)).resolve_encounter_after_action(
+                world_state,
+                result,
+                action,
+                seed=_seed_from_code(room_code),
+            )
 
         if not narrative:
             player_known_info = {

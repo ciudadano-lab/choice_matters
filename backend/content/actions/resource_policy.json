@@ -1,0 +1,13 @@
+{
+  "id": "resource_policy",
+  "action_type": "resource_policy",
+  "label": "Resource policy",
+  "category": "policy",
+  "chain_template": "noticed_chain",
+  "time_cost": 0,
+  "required_inputs": ["focus"],
+  "effects": [],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Policy action for managing logistics and scavenging priorities."
+}

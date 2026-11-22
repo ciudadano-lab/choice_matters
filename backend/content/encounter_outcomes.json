@@ -1,0 +1,84 @@
+{
+  "base_probabilities": {
+    "evaded": 0.37,
+    "close_call": 0.35,
+    "hurt": 0.23,
+    "serious": 0.05
+  },
+  "modifier_cap": 0.12,
+  "modifiers": [
+    {
+      "id": "low_health",
+      "input": "player.health",
+      "condition": "lte",
+      "threshold": 40,
+      "delta": 0.02,
+      "explanation": "Low health makes the encounter harder to endure."
+    },
+    {
+      "id": "low_stamina",
+      "input": "player.stamina",
+      "condition": "lte",
+      "threshold": 30,
+      "delta": 0.01,
+      "explanation": "Low stamina leaves less room to escape harm."
+    },
+    {
+      "id": "high_stress",
+      "input": "player.stress",
+      "condition": "gte",
+      "threshold": 70,
+      "delta": 0.01,
+      "explanation": "High stress makes it harder to react safely."
+    },
+    {
+      "id": "plan_quality",
+      "input": "plan_quality",
+      "per_unit": -0.06,
+      "explanation": "A stronger plan helps limit the encounter's consequences."
+    },
+    {
+      "id": "companions",
+      "input": "player.companion_count",
+      "per_unit": -0.02,
+      "max_units": 3,
+      "explanation": "Companions help cover one another during the encounter."
+    },
+    {
+      "id": "location_danger",
+      "input": "location.dangerLevel",
+      "per_unit": 0.01,
+      "max_units": 5,
+      "explanation": "Dangerous locations make encounters more hazardous."
+    }
+  ],
+  "effects": {
+    "evaded": {
+      "stress": 2
+    },
+    "close_call": {
+      "health": -3,
+      "stamina": -5
+    },
+    "hurt": {
+      "health": -10,
+      "stamina": -5,
+      "injury": "encounter_injury",
+      "expires_days": 2,
+      "mechanical_effect": {
+        "stamina": -5
+      }
+    },
+    "serious": {
+      "health": -20,
+      "stamina": -10,
+      "injury": "serious_encounter_injury",
+      "expires_days": 3,
+      "mechanical_effect": {
+        "health": -5,
+        "stamina": -10
+      },
+      "resource_loss": 1
+    }
+  }
+}

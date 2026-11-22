@@ -1,0 +1,13 @@
+{
+  "id": "negotiate",
+  "action_type": "negotiate",
+  "label": "Negotiate",
+  "category": "social",
+  "chain_template": "noticed_chain",
+  "time_cost": 1,
+  "required_inputs": [],
+  "effects": [],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Negotiate with another survivor."
+}

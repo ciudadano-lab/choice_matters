@@ -1,0 +1,15 @@
+{
+  "id": "signal",
+  "action_type": "signal",
+  "label": "Signal",
+  "category": "utility",
+  "chain_template": "noticed_chain",
+  "time_cost": 1,
+  "required_inputs": ["location"],
+  "effects": [
+    {"type": "set_flag", "target": "location", "flag": "signal_sent", "value": 1}
+  ],
+  "status": "draft",
+  "source": "registry",
+  "notes": "Deferred until the faction layer can consume signal events."
+}

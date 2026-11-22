@@ -10,6 +10,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from world_state import WorldState
+from location_lookup import resolve_location_id
 
 
 class InformationLayer:
@@ -17,8 +18,25 @@ class InformationLayer:
         self._sources = {"scouting", "rumor", "radio_report", "survivor_report", "direct_observation"}
 
     def apply_information(self, world_state: WorldState | dict[str, Any], report: dict[str, Any], *, target_location: str) -> None:
-        locations = self._get_locations(world_state)
-        location = next((item for item in locations if item.get("id") == target_location), None)
+        state = world_state.to_dict() if hasattr(world_state, "to_dict") else world_state
+        location_id = resolve_location_id(state, target_location)
+        raw_locations = state.get("locations", [])
+        if isinstance(raw_locations, dict):
+            location = raw_locations.get(location_id)
+            if not isinstance(location, dict):
+                location = next(
+                    (
+                        item for item in raw_locations.values()
+                        if isinstance(item, dict) and item.get("id") == location_id
+                    ),
+                    None,
+                )
+        else:
+            locations = self._get_locations(world_state)
+            location = next(
+                (item for item in locations if item.get("id") == location_id),
+                None,
+            )
         if location is None:
             return
 
@@ -77,7 +95,10 @@ class InformationLayer:
 
     def _get_locations(self, world_state: WorldState | dict[str, Any]) -> list[dict[str, Any]]:
         if isinstance(world_state, dict):
-            return world_state.get("locations", [])
+            locations = world_state.get("locations", [])
+            if isinstance(locations, dict):
+                return [item for item in locations.values() if isinstance(item, dict)]
+            return locations if isinstance(locations, list) else []
         return world_state.locations
 
     def _compose_visible_state(self, location: dict[str, Any]) -> dict[str, Any]:

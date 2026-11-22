@@ -1,0 +1,16 @@
+{
+  "id": "fortify",
+  "action_type": "fortify",
+  "label": "Fortify",
+  "category": "tactical",
+  "chain_template": "noise_chain",
+  "time_cost": 1,
+  "required_inputs": ["location"],
+  "effects": [
+    {"type": "change_resource", "resource": "building_materials", "amount": -1},
+    {"type": "set_flag", "target": "location", "flag": "fortified", "value": 1, "duration_days": 5}
+  ],
+  "status": "live",
+  "source": "registry",
+  "notes": "Fortify the target location."
+}

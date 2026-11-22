@@ -1,0 +1,40 @@
+[
+  {
+    "id": "night",
+    "order": 30,
+    "label": "Night",
+    "category": "environment",
+    "kind": "situation",
+    "role": "modifier",
+    "applies_to": {"step_kinds": ["gate"]},
+    "calc": {
+      "type": "threshold",
+      "input": "clock.hour",
+      "op": "in",
+      "value": [20, 21, 22, 23, 0, 1, 2, 3, 4, 5],
+      "delta": 0.1
+    },
+    "explanation": "Darkness makes it easier for nearby dangers to notice activity.",
+    "status": "live",
+    "source": "human"
+  },
+  {
+    "id": "weather",
+    "order": 40,
+    "label": "Rain or storm",
+    "category": "environment",
+    "kind": "situation",
+    "role": "modifier",
+    "applies_to": {"step_kinds": ["gate"]},
+    "calc": {
+      "type": "threshold",
+      "input": "world.weather",
+      "op": "in",
+      "value": ["rain", "storm"],
+      "delta": 0.05
+    },
+    "explanation": "Bad weather can make activity more noticeable.",
+    "status": "live",
+    "source": "human"
+  }
+]

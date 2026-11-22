@@ -1,0 +1,16 @@
+{
+  "id": "reinforce",
+  "action_type": "reinforce",
+  "label": "Reinforce",
+  "category": "tactical",
+  "chain_template": "noise_chain",
+  "time_cost": 1,
+  "required_inputs": [],
+  "effects": [
+    {"type": "change_resource", "resource": "medical_supplies", "amount": -1},
+    {"type": "change_stat", "stat": "stress", "amount": -1}
+  ],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Strengthen defenses."
+}

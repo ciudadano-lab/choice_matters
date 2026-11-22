@@ -142,6 +142,7 @@ def test_parser_coverage_matches_current_tactical_taxonomy():
     ("Gather supplies.", "gather"),
     ("Build a shelter.", "build"),
     ("Reinforce the school.", "reinforce"),
+    ("Fortify the school.", "fortify"),
     ("Rest at the shelter.", "rest"),
     ("Communicate with the survivors.", "communicate"),
     ("Negotiate with the survivors.", "negotiate"),

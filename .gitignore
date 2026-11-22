@@ -36,3 +36,4 @@ Thumbs.db
 # runtime data
 data/*
 !data/.gitkeep
+/backend/tools/harness_out/

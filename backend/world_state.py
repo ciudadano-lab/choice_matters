@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from road_network import attach_location, generate_road_network
+from economy import get_starting_resources
 
 
 DEFAULT_LOCATION = {
@@ -259,6 +260,7 @@ def assign_spawn_to_player(player: dict[str, Any], seed: int, slot: int, locatio
 
 
 def _ensure_player_entities(player: dict[str, Any]) -> None:
+    player.setdefault("thirst", 50)
     entities = player.get("entities")
     if not isinstance(entities, dict):
         entities = {}
@@ -957,7 +959,7 @@ def generate_initial_world_state(players: list[dict[str, Any]], seed: int) -> Wo
         factions=factions,
         seed=seed,
         settlements=[],
-        resources={"water": 4, "food": 6, "medical_supplies": 2},
+        resources={},
         activeEvents=[],
         discoveredInformation=[],
         rumors=[{"source": "local", "text": "A hospital and school are marked on an old map."}],
@@ -984,6 +986,7 @@ def generate_initial_world_state(players: list[dict[str, Any]], seed: int) -> Wo
                 "health": 100,
                 "stamina": 100,
                 "hunger": 50,
+                "thirst": 50,
                 "stress": 25,
                 "location": spawn_info["spawnLocationName"],
                 "skills": ["survival"],
@@ -1002,6 +1005,7 @@ def generate_initial_world_state(players: list[dict[str, Any]], seed: int) -> Wo
                 "knownNearbyLocations": spawn_info["knownNearbyLocations"],
                 "spawnSeed": spawn_info["spawnSeed"],
             })
+    world.resources = get_starting_resources(len(world.players))
     world.refresh_layers()
     return world
 
@@ -1113,6 +1117,7 @@ class WorldState:
                             "health": 100,
                             "stamina": 100,
                             "hunger": 50,
+                            "thirst": 50,
                             "stress": 25,
                             "location": player_state.get("facts", {}).get("location", "Unknown Shelter"),
                             "skills": ["survival"],

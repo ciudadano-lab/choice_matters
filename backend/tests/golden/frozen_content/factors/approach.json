@@ -1,0 +1,40 @@
+[
+  {
+    "id": "loud_action",
+    "order": 50,
+    "label": "Loud action",
+    "category": "approach",
+    "kind": "situation",
+    "role": "modifier",
+    "applies_to": {"step_kinds": ["gate"]},
+    "calc": {
+      "type": "threshold",
+      "input": "action.type",
+      "op": "in",
+      "value": ["build", "attack"],
+      "delta": 0.15
+    },
+    "explanation": "Loud actions are more likely to attract attention.",
+    "status": "live",
+    "source": "human"
+  },
+  {
+    "id": "stealth_intent",
+    "order": 60,
+    "label": "Stealth intent",
+    "category": "approach",
+    "kind": "situation",
+    "role": "counter",
+    "applies_to": {"step_kinds": ["gate"]},
+    "calc": {
+      "type": "threshold",
+      "input": "action.stealth_intent",
+      "op": "eq",
+      "value": true,
+      "delta": 0.1
+    },
+    "explanation": "A quiet or stealthy approach helps avoid being noticed.",
+    "status": "live",
+    "source": "human"
+  }
+]

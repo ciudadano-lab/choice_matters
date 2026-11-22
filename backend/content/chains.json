@@ -1,0 +1,69 @@
+{
+  "templates": {
+    "noticed_chain": {
+      "steps": [
+        {
+          "name": "noticed",
+          "kind": "gate",
+          "base": 0.1,
+          "interrupt": false,
+          "requires": null
+        },
+        {
+          "name": "encounter",
+          "kind": "encounter",
+          "base": 0.12,
+          "interrupt": true,
+          "requires": "noticed"
+        }
+      ]
+    },
+    "noise_chain": {
+      "steps": [
+        {
+          "name": "noise",
+          "kind": "gate",
+          "base": 0.1,
+          "interrupt": false,
+          "requires": null
+        },
+        {
+          "name": "encounter",
+          "kind": "encounter",
+          "base": 0.12,
+          "interrupt": true,
+          "requires": "noise"
+        }
+      ]
+    },
+    "travel_chain": {
+      "steps": [
+        {
+          "name": "route_hazard",
+          "kind": "gate",
+          "base": 0.1,
+          "interrupt": false,
+          "requires": null
+        },
+        {
+          "name": "encounter",
+          "kind": "encounter",
+          "base": 0.12,
+          "interrupt": true,
+          "requires": "route_hazard"
+        }
+      ]
+    },
+    "attack_chain": {
+      "steps": [
+        {
+          "name": "encounter",
+          "kind": "encounter",
+          "base": 0.65,
+          "interrupt": true,
+          "requires": null
+        }
+      ]
+    }
+  }
+}

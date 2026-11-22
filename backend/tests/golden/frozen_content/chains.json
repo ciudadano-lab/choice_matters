@@ -1,0 +1,86 @@
+{
+  "templates": {
+    "noticed_chain": {
+      "steps": [
+        {
+          "name": "noticed",
+          "kind": "gate",
+          "base": 0.1,
+          "interrupt": false,
+          "requires": null
+        },
+        {
+          "name": "encounter",
+          "kind": "encounter",
+          "base": 0.2,
+          "interrupt": true,
+          "requires": "noticed"
+        }
+      ]
+    },
+    "noise_chain": {
+      "steps": [
+        {
+          "name": "noise",
+          "kind": "gate",
+          "base": 0.1,
+          "interrupt": false,
+          "requires": null
+        },
+        {
+          "name": "encounter",
+          "kind": "encounter",
+          "base": 0.2,
+          "interrupt": true,
+          "requires": "noise"
+        }
+      ]
+    },
+    "travel_chain": {
+      "steps": [
+        {
+          "name": "route_hazard",
+          "kind": "gate",
+          "base": 0.1,
+          "interrupt": false,
+          "requires": null
+        },
+        {
+          "name": "encounter",
+          "kind": "encounter",
+          "base": 0.2,
+          "interrupt": true,
+          "requires": "route_hazard"
+        }
+      ]
+    },
+    "attack_chain": {
+      "steps": [
+        {
+          "name": "encounter",
+          "kind": "encounter",
+          "base": 0.65,
+          "interrupt": true,
+          "requires": null
+        }
+      ]
+    }
+  },
+  "actions": {
+    "travel": "travel_chain",
+    "search": "noticed_chain",
+    "scavenge": "noticed_chain",
+    "gather": "noticed_chain",
+    "build": "noise_chain",
+    "reinforce": "noise_chain",
+    "rest": "noise_chain",
+    "communicate": "noticed_chain",
+    "negotiate": "noticed_chain",
+    "trade": "noticed_chain",
+    "recruit": "noticed_chain",
+    "send_mission": "noticed_chain",
+    "establish_settlement": "noticed_chain",
+    "defend": "noticed_chain",
+    "attack": "attack_chain"
+  }
+}

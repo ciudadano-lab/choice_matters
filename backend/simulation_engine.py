@@ -5,15 +5,30 @@ import hashlib
 import math
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
+
+from action_registry import get_live_actions
+from economy import apply_action_yield, cap_resource_stores, get_health_recovery_config
+from probability_config import (
+    DEFAULT_PLAN_QUALITY,
+    PLAN_TIER_SHIFT,
+    ZERO_CHANCE,
+    clamp_player_stat,
+)
+from location_lookup import resolve_location_id
+from plan_features import PlanFeatures
+from probability_engine import ChainResult, run_chain
 
 BACKEND_DIR = Path(__file__).resolve().parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from world_state import materialize_poi, settlement_tier
+
+_ACTION_REGISTRY = get_live_actions()
+_REGISTRY_ONLY_ACTIONS = frozenset({"fortify", "craft_repair"})
 
 
 @dataclass(frozen=True)
@@ -23,7 +38,7 @@ class StructuredAction:
     actor: str
     target: str
     parameters: dict[str, Any] = field(default_factory=dict)
-    timeCost: int = 1
+    timeCost: int | None = None
     resourceCost: dict[str, int] = field(default_factory=dict)
     risks: list[str] = field(default_factory=list)
     prerequisites: list[str] = field(default_factory=list)
@@ -50,6 +65,12 @@ class SimulationResult:
     rejectionReason: str | None = None
     physicallyImpossible: bool = False
     impossibleReason: str | None = None
+    rollLog: list[dict[str, Any]] = field(default_factory=list)
+    interruptStep: str | None = None
+    planQuality: float = 0.0
+    planReasons: list[dict[str, str]] = field(default_factory=list)
+    encounterOutcome: dict[str, Any] | None = None
+    resolvedAction: StructuredAction | None = None
 
 
 class SimulationEngine:
@@ -81,6 +102,9 @@ class SimulationEngine:
         "recruit",
         "send_mission",
         "establish_settlement",
+        "fortify",
+        "craft_repair",
+        "forage",
         "failed_attempt",
     }
 
@@ -97,12 +121,26 @@ class SimulationEngine:
         """Resolve one internal tactical day from the player's strategic policy."""
         raw_state = world_state.to_dict() if hasattr(world_state, "to_dict") else world_state
         player = self._get_player(raw_state, actor_id)
-        location = player.get("location") if player else None
+        location = resolve_location_id(raw_state, player.get("location")) if player else None
         if not location:
-            location = next(
-                (item.get("id") for item in raw_state.get("locations", []) if item.get("discovered")),
-                "location_shelter",
-            )
+            locations = raw_state.get("locations", [])
+            if isinstance(locations, dict):
+                location_entries = locations.items()
+            elif isinstance(locations, list):
+                location_entries = ((None, item) for item in locations)
+            else:
+                location_entries = ()
+            for location_key, item in location_entries:
+                if not isinstance(item, dict) or not item.get("discovered"):
+                    continue
+                location_value = item.get("id")
+                if not isinstance(location_value, str):
+                    location_value = location_key
+                location = resolve_location_id(raw_state, location_value)
+                if location is not None:
+                    break
+            if not location:
+                location = "location_shelter"
 
         action_type = str(policy.get("actionType", policy.get("type", ""))).casefold()
         focus = str(policy.get("focus", policy.get("stance", ""))).casefold()
@@ -161,7 +199,9 @@ class SimulationEngine:
                 tactical_type = "rest"
             elif any(keyword in focus for keyword in ("attack", "aggressive", "hostile", "raid", "assault")):
                 tactical_type = "reinforce"
-            elif "fortif" in focus or "defen" in focus:
+            elif "fortif" in focus:
+                tactical_type = "fortify"
+            elif "defen" in focus:
                 tactical_type = "reinforce"
             else:
                 tactical_type = "build"
@@ -185,15 +225,62 @@ class SimulationEngine:
             timeCost=0,
             resourceCost={},
         )
-        return self.apply(world_state, action)
+        result = self.apply(world_state, action)
+        apply_action_yield(world_state, result, action)
+        self.apply_rest_recovery(result, actor_id)
+        result.resolvedAction = action
+        return result
+
+    def apply_rest_recovery(self, result: SimulationResult, actor_id: str) -> None:
+        if result.actionType != "rest" or result.rejected or result.physicallyImpossible:
+            return
+        updated_state = result.updatedWorldState
+        state = (
+            updated_state.get("world_state", updated_state)
+            if isinstance(updated_state, dict)
+            else {}
+        )
+        player = self._get_player(state, actor_id)
+        if player is None:
+            return
+        before = player.get("health", 100)
+        after = clamp_player_stat(
+            before + get_health_recovery_config()["rest_health_recovery"]
+        )
+        if after == before:
+            return
+        player["health"] = after
+        change = next(
+            (
+                item for item in result.playerStatusChanges
+                if item.get("playerId") == actor_id
+            ),
+            None,
+        )
+        if change is None:
+            result.playerStatusChanges.append({
+                "playerId": actor_id,
+                "health": after - before,
+            })
+        else:
+            change["health"] = after - before
 
     def _policy_location_target(self, state: dict[str, Any], focus: str, current_location: str) -> str | None:
         if not any(keyword in focus for keyword in ("travel", "move", "relocate", "explore")):
             return None
         current = self._get_location(state, current_location)
         current_coordinates = (current or {}).get("coordinates", {})
-        for location in state.get("locations", []):
-            location_id = str(location.get("id", ""))
+        locations = state.get("locations", [])
+        if isinstance(locations, dict):
+            location_entries = locations.items()
+        elif isinstance(locations, list):
+            location_entries = ((None, location) for location in locations)
+        else:
+            location_entries = ()
+        for location_key, location in location_entries:
+            if not isinstance(location, dict):
+                continue
+            location_id = str(location.get("id", location_key or ""))
             name = str(location.get("name", "")).casefold()
             tokens = [token for token in re.findall(r"[a-z0-9]+", name) if len(token) >= 4]
             named = location_id.casefold() in focus or (tokens and all(token in focus for token in tokens))
@@ -228,6 +315,12 @@ class SimulationEngine:
 
         if action.actionType not in self.ACTIONS:
             raise ValueError(f"Unsupported action type: {action.actionType}")
+        if action.timeCost is None:
+            definition = _ACTION_REGISTRY.get(action.actionType)
+            action = replace(
+                action,
+                timeCost=definition.time_cost if definition is not None else 1,
+            )
 
         rejection_reason = self._validate_target_entity(state, action)
         if rejection_reason is not None:
@@ -238,7 +331,7 @@ class SimulationEngine:
                 resourceChanges={},
                 playerStatusChanges=[],
                 locationChanges=[],
-                encounterProbability=0.0,
+                encounterProbability=ZERO_CHANCE,
                 encounterOccurred=False,
                 encounterDetails={"type": "hostile_encounter", "outcome": "not_applicable"},
                 factionRelationshipChanges=[],
@@ -252,6 +345,20 @@ class SimulationEngine:
 
         deterministic_seed = self._stable_seed(action.actionId, action.parameters.get("seed", self.seed))
         rng = deterministic_seed
+        policy = action.parameters.get("policy")
+        raw_plan_features = (
+            policy.get("planFeatures")
+            if isinstance(policy, dict)
+            else None
+        )
+        plan_features = PlanFeatures.from_untrusted(raw_plan_features)
+        chain = run_chain(
+            state,
+            action,
+            action.parameters.get("seed", self.seed),
+            plan_quality=action.parameters.get("planQuality", DEFAULT_PLAN_QUALITY),
+            plan_features=plan_features,
+        )
 
         if action.actionType in self.POLICY_ACTIONS:
             result = self._resolve_policy_commitment(state, action)
@@ -265,6 +372,8 @@ class SimulationEngine:
             result = self._resolve_scavenge(state, action, rng)
         elif action.actionType == "gather":
             result = self._resolve_gather(state, action, rng)
+        elif action.actionType == "forage":
+            result = self._resolve_forage(state, action, rng)
         elif action.actionType == "build":
             result = self._resolve_build(state, action, rng)
         elif action.actionType == "reinforce":
@@ -285,18 +394,38 @@ class SimulationEngine:
             result = self._resolve_recruit(state, action, rng)
         elif action.actionType == "send_mission":
             result = self._resolve_send_mission(state, action, rng)
+        elif action.actionType in _REGISTRY_ONLY_ACTIONS:
+            result = self._resolve_registry_action(state, action, rng)
         else:
             result = self._resolve_establish_settlement(state, action, rng)
 
-        encounter_probability = self._clamp(float(result.get("encounterProbability", 0.0)))
-        encounter_roll = self._stable_seed(
-            f"encounter:{action.actionId}", self.seed
-        ) % 1_000_000 / 1_000_000
-        encounter_occurred = encounter_roll < encounter_probability
+        definition = _ACTION_REGISTRY.get(action.actionType)
+        if definition is not None and result.get("worldEventsTriggered"):
+            self._apply_registry_effects(
+                state,
+                action,
+                result,
+                definition,
+                additive=action.actionType in _REGISTRY_ONLY_ACTIONS,
+            )
+
+        physically_impossible = bool(result.get("physicallyImpossible", False))
+        if physically_impossible:
+            chain = ChainResult([], None, ZERO_CHANCE, False, None)
+
+        encounter_probability = chain.encounter_probability
+        encounter_roll = chain.encounter_roll
+        encounter_occurred = chain.encounter_occurred
         encounter_details = {
             "type": "hostile_encounter",
             "roll": encounter_roll,
-            "outcome": "occurred" if encounter_occurred else "avoided",
+            "outcome": (
+                "occurred"
+                if encounter_occurred
+                else "avoided"
+                if encounter_roll is not None
+                else "not_applicable"
+            ),
         }
         if encounter_occurred:
             result["worldEventsTriggered"].append({
@@ -315,6 +444,10 @@ class SimulationEngine:
             **state.get("resources", {}),
             **{k: state.get("resources", {}).get(k, 0) + v for k, v in result["resourceChanges"].items()},
         }
+        state["resources"] = cap_resource_stores(
+            state["resources"],
+            len(state["players"]),
+        )
         state["activeEvents"] = state.get("activeEvents", []) + result["worldEventsTriggered"]
         state["discoveredInformation"] = state.get("discoveredInformation", []) + result["informationDiscovered"]
         state["relationships"] = state.get("relationships", []) + result["factionRelationshipChanges"]
@@ -338,8 +471,8 @@ class SimulationEngine:
             for key, value in change.items():
                 if key in {"playerId", "statusEffects"}:
                     continue
-                if isinstance(value, (int, float)) and key in {"health", "stamina", "hunger", "stress"}:
-                    player[key] = player.get(key, 0) + value
+                if isinstance(value, (int, float)) and key in {"health", "stamina", "hunger", "thirst", "stress"}:
+                    player[key] = clamp_player_stat(player.get(key, 0) + value)
                 else:
                     player[key] = value
 
@@ -348,7 +481,13 @@ class SimulationEngine:
             if location is not None:
                 location["visibleState"] = {"status": change.get("state", "visited")}
 
-        outcome_tier = self._resolve_outcome_tier(state, action, result, rng)
+        outcome_tier = self._resolve_outcome_tier(
+            state,
+            action,
+            result,
+            rng,
+            chain.plan_quality,
+        )
         social_outcome = self._resolve_social_outcome(state, action, rng)
         self._apply_injury_if_needed(state, action, outcome_tier, rng)
         if social_outcome:
@@ -376,8 +515,12 @@ class SimulationEngine:
             updatedWorldState=state,
             outcomeTier=outcome_tier,
             socialOutcome=result.get("socialOutcome", {}),
-            physicallyImpossible=bool(result.get("physicallyImpossible", False)),
+            physicallyImpossible=physically_impossible,
             impossibleReason=result.get("impossibleReason"),
+            rollLog=[step.to_dict() for step in chain.steps],
+            interruptStep=chain.interrupt_step,
+            planQuality=chain.plan_quality,
+            planReasons=chain.plan_reasons,
         )
 
     def _resolve_policy_commitment(self, state: dict[str, Any], action: StructuredAction) -> dict[str, Any]:
@@ -437,9 +580,9 @@ class SimulationEngine:
         existing = player.setdefault("statusEffects", [])
         if not any(item.get("name") == injury_name for item in existing):
             existing.append(status_effect)
-        player["stamina"] = max(0, player.get("stamina", 0) + mechanical_effect.get("stamina", 0))
-        player["health"] = max(0, player.get("health", 0) + mechanical_effect.get("health", 0))
-        player["stress"] = max(0, player.get("stress", 0) + mechanical_effect.get("stress", 0))
+        player["stamina"] = clamp_player_stat(player.get("stamina", 0) + mechanical_effect.get("stamina", 0))
+        player["health"] = clamp_player_stat(player.get("health", 0) + mechanical_effect.get("health", 0))
+        player["stress"] = clamp_player_stat(player.get("stress", 0) + mechanical_effect.get("stress", 0))
 
     def _resolve_social_outcome(self, state: dict[str, Any], action: StructuredAction, rng: int) -> dict[str, Any]:
         if action.actionType not in {"recruit", "negotiate", "trade"}:
@@ -524,7 +667,14 @@ class SimulationEngine:
             "impossibleReason": "Nothing happens because the claimed effect is not possible in this world.",
         }
 
-    def _resolve_outcome_tier(self, state: dict[str, Any], action: StructuredAction, result: dict[str, Any], rng: int) -> str:
+    def _resolve_outcome_tier(
+        self,
+        state: dict[str, Any],
+        action: StructuredAction,
+        result: dict[str, Any],
+        rng: int,
+        plan_quality: float = 0.0,
+    ) -> str:
         if result.get("physicallyImpossible"):
             return "failure"
 
@@ -533,9 +683,11 @@ class SimulationEngine:
             if actor is None:
                 actor = {"stamina": 50, "health": 100, "stress": 0}
 
-            if actor.get("location") and str(actor.get("location")) == str(action.target):
+            actor_location_id = resolve_location_id(state, actor.get("location"))
+            target_location_id = resolve_location_id(state, action.target)
+            if action.actionType == "travel" and actor_location_id is not None and actor_location_id == target_location_id:
                 return "failure"
-            if action.actionType == "travel" and self._get_location(state, action.target) is None:
+            if action.actionType == "travel" and target_location_id is None:
                 return "failure"
 
             physical = float(actor.get("stamina", 50)) / 100.0
@@ -558,6 +710,8 @@ class SimulationEngine:
                 score = (trust * 0.7) + (health * 0.1) + (base * 0.2)
             else:
                 score = (physical * 0.4) + (health * 0.2) + (base * 0.4)
+
+            score += PLAN_TIER_SHIFT * plan_quality
 
             if score >= 0.82:
                 return "critical_success"
@@ -610,20 +764,21 @@ class SimulationEngine:
         player = self._get_player(state, action.actor)
         if not player:
             return self._empty_result(action, 0, {})
-        target = action.target
-        location = next((item for item in state.get("locations", []) if item.get("id") == target), None)
+        target = resolve_location_id(state, action.target)
+        if target is None:
+            return self._empty_result(action, 0, {})
+        location = self._get_location(state, target)
         if location is None:
             return self._empty_result(action, 0, {})
 
         player["location"] = target
         self._apply_resource_cost(state, action.resourceCost)
-        encounter_probability = self._clamp(0.15 + (rng % 10) / 100.0)
         return {
             "timeConsumed": action.timeCost,
             "resourceChanges": self._resource_delta(action.resourceCost),
             "playerStatusChanges": [{"playerId": action.actor, "location": target, "stamina": -1}],
             "locationChanges": [{"locationId": target, "state": "visited"}],
-            "encounterProbability": encounter_probability,
+            "encounterProbability": 0.0,
             "factionRelationshipChanges": [],
             "informationDiscovered": [{"id": f"travel_{action.actionId}", "content": f"Arrived at {location['name']}"}],
             "worldEventsTriggered": [{"type": "travel", "seed": rng}],
@@ -654,7 +809,7 @@ class SimulationEngine:
             "resourceChanges": self._resource_delta(action.resourceCost),
             "playerStatusChanges": [{"playerId": action.actor, "stress": 2}],
             "locationChanges": [],
-            "encounterProbability": self._clamp(0.05 + (rng % 7) / 100.0),
+            "encounterProbability": 0.0,
             "factionRelationshipChanges": [],
             "informationDiscovered": [info],
             "worldEventsTriggered": [{"type": "search", "seed": rng}],
@@ -662,7 +817,8 @@ class SimulationEngine:
 
     def _resolve_scavenge(self, state: dict[str, Any], action: StructuredAction, rng: int) -> dict[str, Any]:
         location = self._get_location(state, action.target)
-        if location is None:
+        location_id = resolve_location_id(state, action.target)
+        if location is None or location_id is None:
             return self._empty_result(action, 1, {})
 
         resources = location.get("resources", {})
@@ -695,8 +851,8 @@ class SimulationEngine:
             "timeConsumed": action.timeCost,
             "resourceChanges": harvested,
             "playerStatusChanges": [{"playerId": action.actor, "stamina": -1, "stress": 1}],
-            "locationChanges": [{"locationId": action.target, "state": "scavenged"}],
-            "encounterProbability": self._clamp(0.05 + (rng % 8) / 100.0),
+            "locationChanges": [{"locationId": location_id, "state": "scavenged"}],
+            "encounterProbability": 0.0,
             "factionRelationshipChanges": [],
             "informationDiscovered": [information],
             "worldEventsTriggered": [{"type": "scavenge", "seed": rng}],
@@ -709,10 +865,22 @@ class SimulationEngine:
             "resourceChanges": {"food": 2, "water": 1},
             "playerStatusChanges": [{"playerId": action.actor, "hunger": -2}],
             "locationChanges": [],
-            "encounterProbability": self._clamp(0.08 + (rng % 5) / 100.0),
+            "encounterProbability": 0.0,
             "factionRelationshipChanges": [],
             "informationDiscovered": [],
             "worldEventsTriggered": [{"type": "gather", "seed": rng}],
+        }
+
+    def _resolve_forage(self, state: dict[str, Any], action: StructuredAction, rng: int) -> dict[str, Any]:
+        return {
+            "timeConsumed": action.timeCost,
+            "resourceChanges": self._resource_delta(action.resourceCost),
+            "playerStatusChanges": [{"playerId": action.actor, "stamina": -1}],
+            "locationChanges": [],
+            "encounterProbability": 0.0,
+            "factionRelationshipChanges": [],
+            "informationDiscovered": [],
+            "worldEventsTriggered": [{"type": "forage", "seed": rng}],
         }
 
     def _resolve_build(self, state: dict[str, Any], action: StructuredAction, rng: int) -> dict[str, Any]:
@@ -722,7 +890,7 @@ class SimulationEngine:
             "resourceChanges": {"food": -1},
             "playerStatusChanges": [{"playerId": action.actor, "stress": 1}],
             "locationChanges": [],
-            "encounterProbability": self._clamp(0.1 + (rng % 4) / 100.0),
+            "encounterProbability": 0.0,
             "factionRelationshipChanges": [],
             "informationDiscovered": [],
             "worldEventsTriggered": [{"type": "build", "seed": rng}],
@@ -735,7 +903,7 @@ class SimulationEngine:
             "resourceChanges": {"medical_supplies": -1},
             "playerStatusChanges": [{"playerId": action.actor, "stress": -1}],
             "locationChanges": [],
-            "encounterProbability": self._clamp(0.06 + (rng % 6) / 100.0),
+            "encounterProbability": 0.0,
             "factionRelationshipChanges": [],
             "informationDiscovered": [],
             "worldEventsTriggered": [{"type": "reinforce", "seed": rng}],
@@ -747,7 +915,7 @@ class SimulationEngine:
             "resourceChanges": {},
             "playerStatusChanges": [{"playerId": action.actor, "stress": -3, "stamina": 10}],
             "locationChanges": [],
-            "encounterProbability": self._clamp(0.03 + (rng % 3) / 100.0),
+            "encounterProbability": 0.0,
             "factionRelationshipChanges": [],
             "informationDiscovered": [],
             "worldEventsTriggered": [{"type": "rest", "seed": rng}],
@@ -759,7 +927,7 @@ class SimulationEngine:
             "resourceChanges": {},
             "playerStatusChanges": [{"playerId": action.actor, "stress": -1}],
             "locationChanges": [],
-            "encounterProbability": self._clamp(0.05 + (rng % 8) / 100.0),
+            "encounterProbability": 0.0,
             "factionRelationshipChanges": [{"factionId": "faction_survivors", "delta": 1}],
             "informationDiscovered": [{"id": f"communicate_{action.actionId}", "content": "Messages exchanged"}],
             "worldEventsTriggered": [{"type": "communicate", "seed": rng}],
@@ -771,7 +939,7 @@ class SimulationEngine:
             "resourceChanges": {},
             "playerStatusChanges": [],
             "locationChanges": [],
-            "encounterProbability": self._clamp(0.04 + (rng % 5) / 100.0),
+            "encounterProbability": 0.0,
             "factionRelationshipChanges": [{"factionId": "faction_survivors", "delta": 2}],
             "informationDiscovered": [{"id": f"negotiate_{action.actionId}", "content": "Negotiation succeeded"}],
             "worldEventsTriggered": [{"type": "negotiate", "seed": rng}],
@@ -784,7 +952,7 @@ class SimulationEngine:
             "resourceChanges": {"food": -1},
             "playerStatusChanges": [{"playerId": action.actor, "stress": 4}],
             "locationChanges": [],
-            "encounterProbability": 0.9,
+            "encounterProbability": 0.0,
             "factionRelationshipChanges": [{"factionId": "faction_survivors", "delta": -3}],
             "informationDiscovered": [],
             "worldEventsTriggered": [{"type": "attack", "seed": rng}],
@@ -796,7 +964,7 @@ class SimulationEngine:
             "resourceChanges": {},
             "playerStatusChanges": [{"playerId": action.actor, "stress": -2, "health": 0}],
             "locationChanges": [],
-            "encounterProbability": self._clamp(0.02 + (rng % 4) / 100.0),
+            "encounterProbability": 0.0,
             "factionRelationshipChanges": [],
             "informationDiscovered": [],
             "worldEventsTriggered": [{"type": "defend", "seed": rng}],
@@ -808,7 +976,7 @@ class SimulationEngine:
             "resourceChanges": {"water": -1, "food": 1},
             "playerStatusChanges": [],
             "locationChanges": [],
-            "encounterProbability": self._clamp(0.07 + (rng % 4) / 100.0),
+            "encounterProbability": 0.0,
             "factionRelationshipChanges": [{"factionId": "faction_survivors", "delta": 1}],
             "informationDiscovered": [{"id": f"trade_{action.actionId}", "content": "Trade completed"}],
             "worldEventsTriggered": [{"type": "trade", "seed": rng}],
@@ -820,7 +988,7 @@ class SimulationEngine:
             "resourceChanges": {"food": -1},
             "playerStatusChanges": [],
             "locationChanges": [],
-            "encounterProbability": self._clamp(0.05 + (rng % 6) / 100.0),
+            "encounterProbability": 0.0,
             "factionRelationshipChanges": [{"factionId": "faction_survivors", "delta": 1}],
             "informationDiscovered": [{"id": f"recruit_{action.actionId}", "content": "Recruitment offer sent"}],
             "worldEventsTriggered": [{"type": "recruit", "seed": rng}],
@@ -832,7 +1000,7 @@ class SimulationEngine:
             "resourceChanges": {"water": -1},
             "playerStatusChanges": [{"playerId": action.target, "stress": 2}],
             "locationChanges": [],
-            "encounterProbability": self._clamp(0.1 + (rng % 5) / 100.0),
+            "encounterProbability": 0.0,
             "factionRelationshipChanges": [],
             "informationDiscovered": [{"id": f"mission_{action.actionId}", "content": "Mission assigned"}],
             "worldEventsTriggered": [{"type": "mission", "seed": rng}],
@@ -841,6 +1009,7 @@ class SimulationEngine:
     def _resolve_establish_settlement(self, state: dict[str, Any], action: StructuredAction, rng: int) -> dict[str, Any]:
         location = self._get_location(state, action.target)
         target_name = (location or {}).get("name", action.target)
+        target_location_id = resolve_location_id(state, action.target) or action.target
         settlement_name = f"{target_name} Settlement"
         settlements = state.setdefault("settlements", [])
         if not isinstance(settlements, list):
@@ -848,7 +1017,7 @@ class SimulationEngine:
             state["settlements"] = settlements
 
         existing_index = next(
-            (idx for idx, settlement in enumerate(settlements) if isinstance(settlement, dict) and settlement.get("location") == action.target),
+            (idx for idx, settlement in enumerate(settlements) if isinstance(settlement, dict) and settlement.get("location") == target_location_id),
             None,
         )
 
@@ -863,7 +1032,7 @@ class SimulationEngine:
             settlement_record = {
                 "id": action.actionId,
                 "name": settlement_name,
-                "location": action.target,
+                "location": target_location_id,
                 "coordinates": copy.deepcopy((location or {}).get("coordinates", {"x": 0, "y": 0})),
                 "population": population,
                 "tier": settlement_tier(population),
@@ -876,12 +1045,222 @@ class SimulationEngine:
             "timeConsumed": action.timeCost,
             "resourceChanges": {"food": -2, "water": -1},
             "playerStatusChanges": [{"playerId": action.actor, "stress": -1}],
-            "locationChanges": [{"locationId": action.target, "state": "settled"}],
-            "encounterProbability": self._clamp(0.02 + (rng % 6) / 100.0),
+            "locationChanges": [{"locationId": target_location_id, "state": "settled"}],
+            "encounterProbability": 0.0,
             "factionRelationshipChanges": [{"factionId": "faction_survivors", "delta": 2}],
             "informationDiscovered": [{"id": f"settlement_{action.actionId}", "content": f"Settlement founded at {target_name}: {settlement_record['population']} residents"}],
             "worldEventsTriggered": [{"type": "settlement", "seed": rng}],
         }
+
+    def _resolve_registry_action(
+        self,
+        state: dict[str, Any],
+        action: StructuredAction,
+        rng: int,
+    ) -> dict[str, Any]:
+        definition = _ACTION_REGISTRY[action.actionType]
+        self._apply_resource_cost(state, action.resourceCost)
+        return {
+            "timeConsumed": definition.time_cost,
+            "resourceChanges": self._resource_delta(action.resourceCost),
+            "playerStatusChanges": [],
+            "locationChanges": [],
+            "encounterProbability": 0.0,
+            "factionRelationshipChanges": [],
+            "informationDiscovered": [{
+                "id": f"{action.actionType}_{action.actionId}",
+                "content": f"{definition.label} completed.",
+            }],
+            "worldEventsTriggered": [{"type": action.actionType, "seed": rng}],
+        }
+
+    def _apply_registry_effects(
+        self,
+        state: dict[str, Any],
+        action: StructuredAction,
+        result: dict[str, Any],
+        definition: Any,
+        *,
+        additive: bool,
+    ) -> None:
+        result["timeConsumed"] = action.timeCost
+        resource_changes = result.setdefault("resourceChanges", {})
+        player_changes = result.setdefault("playerStatusChanges", [])
+        location_changes = result.setdefault("locationChanges", [])
+
+        for effect in definition.effects:
+            if effect.type == "change_resource":
+                if effect.resource is None or effect.amount is None:
+                    raise ValueError(
+                        f"{definition.id}: change_resource requires resource and amount"
+                    )
+                prior = resource_changes.get(effect.resource, 0) if additive else 0
+                resource_changes[effect.resource] = prior + effect.amount
+            elif effect.type == "change_stat":
+                if effect.stat is None or effect.amount is None:
+                    raise ValueError(
+                        f"{definition.id}: change_stat requires stat and amount"
+                    )
+                self._set_player_change(
+                    player_changes,
+                    self._effect_player_id(action, effect.target),
+                    effect.stat,
+                    effect.amount,
+                    additive=additive,
+                )
+            elif effect.type == "move":
+                location_ref = effect.location or action.target
+                location_id = resolve_location_id(state, location_ref)
+                if location_id is None:
+                    continue
+                self._set_player_change(
+                    player_changes,
+                    self._effect_player_id(action, effect.target),
+                    "location",
+                    location_id,
+                    additive=False,
+                )
+                location_changes[:] = [
+                    change for change in location_changes
+                    if change.get("locationId") != location_id
+                ]
+                location_changes.append({"locationId": location_id, "state": "visited"})
+            elif effect.type in {"add_status", "remove_status"}:
+                self._apply_status_effect(state, action, effect)
+            elif effect.type in {"add_item", "remove_item"}:
+                self._apply_inventory_effect(state, action, effect)
+            elif effect.type == "set_flag":
+                self._apply_flag_effect(state, action, effect)
+
+    @staticmethod
+    def _effect_player_id(action: StructuredAction, target: str | None) -> str:
+        if target in (None, "actor"):
+            return action.actor
+        if target == "target":
+            return action.target
+        return target
+
+    @staticmethod
+    def _set_player_change(
+        player_changes: list[dict[str, Any]],
+        player_id: str,
+        stat: str,
+        amount: Any,
+        *,
+        additive: bool,
+    ) -> None:
+        if not additive:
+            for record in player_changes:
+                if record.get("playerId") == player_id:
+                    record.pop(stat, None)
+            player_changes[:] = [
+                record for record in player_changes
+                if set(record) != {"playerId"}
+            ]
+        record = next(
+            (item for item in player_changes if item.get("playerId") == player_id),
+            None,
+        )
+        if record is None:
+            record = {"playerId": player_id}
+            player_changes.append(record)
+        record[stat] = record.get(stat, 0) + amount if additive else amount
+
+    def _effect_player(
+        self,
+        state: dict[str, Any],
+        action: StructuredAction,
+        target: str | None,
+    ) -> dict[str, Any]:
+        player_id = self._effect_player_id(action, target)
+        player = self._get_player(state, player_id)
+        if player is None:
+            raise ValueError(
+                f"{action.actionType}: registry effect target player {player_id!r} is missing"
+            )
+        return player
+
+    def _apply_status_effect(
+        self,
+        state: dict[str, Any],
+        action: StructuredAction,
+        effect: Any,
+    ) -> None:
+        if not effect.status:
+            raise ValueError(f"{action.actionType}: status effects require a status name")
+        player = self._effect_player(state, action, effect.target)
+        statuses = player.setdefault("statusEffects", [])
+        if effect.type == "add_status":
+            statuses.append({
+                "id": f"effect_{action.actionId}_{effect.status}",
+                "name": effect.status,
+                "appliedDay": state.get("currentDay", 1),
+                "mechanicalEffect": {},
+            })
+        else:
+            player["statusEffects"] = [
+                status for status in statuses
+                if not (
+                    isinstance(status, dict)
+                    and effect.status in {status.get("id"), status.get("name")}
+                )
+            ]
+
+    def _apply_inventory_effect(
+        self,
+        state: dict[str, Any],
+        action: StructuredAction,
+        effect: Any,
+    ) -> None:
+        if not effect.item:
+            raise ValueError(f"{action.actionType}: item effects require an item name")
+        player = self._effect_player(state, action, effect.target)
+        inventory = player.setdefault("inventory", [])
+        if effect.type == "add_item":
+            inventory.append(effect.item)
+            return
+        for index, item in enumerate(inventory):
+            name = (
+                item.get("name", item.get("id", item.get("itemId")))
+                if isinstance(item, dict)
+                else item
+            )
+            if name == effect.item:
+                inventory.pop(index)
+                return
+        raise ValueError(
+            f"{action.actionType}: cannot remove missing item {effect.item!r}"
+        )
+
+    def _apply_flag_effect(
+        self,
+        state: dict[str, Any],
+        action: StructuredAction,
+        effect: Any,
+    ) -> None:
+        if not effect.flag:
+            raise ValueError(f"{action.actionType}: set_flag requires a flag name")
+        value = effect.value if effect.value is not None else 1
+        if effect.target == "location":
+            location_id = resolve_location_id(state, action.target)
+            location = self._get_location(state, location_id) if location_id else None
+            if location is None:
+                raise ValueError(
+                    f"{action.actionType}: flag target location {action.target!r} is missing"
+                )
+            location.setdefault("flags", {})[effect.flag] = value
+            expiries = location.setdefault("flagExpiries", {})
+            if effect.duration_days is None:
+                expiries.pop(effect.flag, None)
+            else:
+                expiries[effect.flag] = (
+                    int(state.get("currentDay", 1)) + effect.duration_days
+                )
+        elif effect.target in {"actor", "target"}:
+            player = self._effect_player(state, action, effect.target)
+            player.setdefault("flags", {})[effect.flag] = value
+        else:
+            state.setdefault("flags", {})[effect.flag] = value
 
     def _empty_result(self, action: StructuredAction, time_cost: int, resource_cost: dict[str, int]) -> dict[str, Any]:
         return {
@@ -902,7 +1281,30 @@ class SimulationEngine:
         return next((player for player in players if player.get("id") == actor_id), None)
 
     def _get_location(self, state: dict[str, Any], location_id: str) -> dict[str, Any] | None:
-        return next((item for item in state.get("locations", []) if item.get("id") == location_id), None)
+        resolved_id = resolve_location_id(state, location_id)
+        locations = state.get("locations", [])
+        if resolved_id is None:
+            return None
+        if isinstance(locations, dict):
+            location = locations.get(resolved_id)
+            if isinstance(location, dict):
+                return location
+            return next(
+                (
+                    item for item in locations.values()
+                    if isinstance(item, dict) and item.get("id") == resolved_id
+                ),
+                None,
+            )
+        if isinstance(locations, list):
+            return next(
+                (
+                    item for item in locations
+                    if isinstance(item, dict) and item.get("id") == resolved_id
+                ),
+                None,
+            )
+        return None
 
     def _apply_resource_cost(self, state: dict[str, Any], resource_cost: dict[str, int]) -> None:
         for resource_name, value in resource_cost.items():

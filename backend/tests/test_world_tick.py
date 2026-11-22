@@ -2,6 +2,7 @@ import pytest
 
 from simulation_engine import SimulationEngine
 from game_data import TACTICAL_ACTION_TYPES
+from probability_config import TIME_SLOTS
 from world_state import WorldState
 from world_tick import WorldTick, WorldEventQueue
 
@@ -18,7 +19,8 @@ TACTICAL_POLICY_CASES = [
     ({"actionType": "diplomatic_stance", "stance": "alliance"}, "negotiate"),
     ({"actionType": "diplomatic_stance", "stance": "trade resources"}, "trade"),
     ({"actionType": "infrastructure_investment", "focus": "found a settlement", "pivotalTiming": "immediate"}, "establish_settlement"),
-    ({"actionType": "infrastructure_investment", "focus": "fortify the shelter"}, "reinforce"),
+    ({"actionType": "infrastructure_investment", "focus": "fortify the shelter"}, "fortify"),
+    ({"actionType": "infrastructure_investment", "focus": "defend the shelter"}, "reinforce"),
     ({"actionType": "infrastructure_investment", "focus": "build a workshop"}, "build"),
     ({"actionType": "population_policy", "focus": "recruit survivors"}, "recruit"),
     ({"actionType": "personal_development", "focus": "rest and recover"}, "rest"),
@@ -281,6 +283,35 @@ def test_settlements_grow_deterministically_and_emit_tier_transition_event():
     assert transitions
     assert transitions[0]["fromTier"] == 1
     assert transitions[0]["toTier"] == 2
+
+
+def test_time_slots_follow_expected_order_and_rollover():
+    assert [name for name, _ in TIME_SLOTS] == ["dawn", "day", "dusk", "night"]
+    assert WorldTick.slot_name_for_time("00:00") == "night"
+    assert WorldTick.slot_name_for_time("06:00") == "dawn"
+    assert WorldTick.slot_name_for_time("12:00") == "day"
+    assert WorldTick.slot_name_for_time("18:00") == "dusk"
+    assert WorldTick.slot_name_for_time("22:00") == "night"
+
+    world_state = WorldState.from_dict({
+        "currentDay": 1,
+        "currentTime": "22:00",
+        "players": [{
+            "id": "player_1",
+            "location": "school",
+            "hunger": 10,
+            "stress": 30,
+            "statusEffects": [{"id": "e1", "mechanicalEffect": {"health": -10}}],
+        }],
+        "locations": [{"id": "school", "name": "School", "discovered": True, "zombiePopulation": 1, "dangerLevel": 1}],
+    })
+
+    updated = WorldTick(seed=13).advance_slot(world_state, WorldEventQueue(), run_autopilot=False)
+
+    assert updated.currentDay == 2
+    assert updated.currentTime == "06:00"
+    assert updated.players[0]["stress"] <= 100
+    assert updated.players[0]["hunger"] <= 100
 
 
 def test_world_tick_advances_world_state_and_schedules_events():

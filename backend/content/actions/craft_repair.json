@@ -1,0 +1,16 @@
+{
+  "id": "craft_repair",
+  "action_type": "craft_repair",
+  "label": "Craft / repair",
+  "category": "utility",
+  "chain_template": "noise_chain",
+  "time_cost": 1,
+  "required_inputs": [],
+  "effects": [
+    {"type": "change_resource", "resource": "medical_supplies", "amount": -1},
+    {"type": "add_item", "target": "actor", "item": "repair_kit"}
+  ],
+  "status": "live",
+  "source": "registry",
+  "notes": "Craft a repair kit that can be included in plan preparation."
+}

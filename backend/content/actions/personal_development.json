@@ -1,0 +1,13 @@
+{
+  "id": "personal_development",
+  "action_type": "personal_development",
+  "label": "Personal development",
+  "category": "policy",
+  "chain_template": "noise_chain",
+  "time_cost": 0,
+  "required_inputs": ["focus"],
+  "effects": [],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Policy action for training, rest, and personal recovery."
+}

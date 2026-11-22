@@ -1,5 +1,8 @@
 import copy
 
+import pytest
+
+from action_registry import ActionDefinition
 from simulation_engine import SimulationEngine, StructuredAction
 from world_state import WorldState
 from world_tick import WorldTick, WorldEventQueue
@@ -109,6 +112,140 @@ def test_simulation_engine_applies_travel_deterministically():
         event["type"] != "encounter" or first.encounterOccurred
         for event in first.worldEventsTriggered
     )
+
+
+@pytest.mark.parametrize(
+    ("action_type", "expected_flag", "expected_item"),
+    [
+        ("fortify", "fortified", None),
+        ("craft_repair", None, "repair_kit"),
+    ],
+)
+def test_registry_only_actions_apply_effects_and_registry_time_cost(
+    action_type,
+    expected_flag,
+    expected_item,
+):
+    world = {
+        "currentDay": 1,
+        "currentTime": "08:00",
+        "players": [{
+            "id": "player_1",
+            "location": "shelter",
+            "health": 100,
+            "stamina": 100,
+            "stress": 0,
+            "inventory": [],
+            "statusEffects": [],
+        }],
+        "locations": [{"id": "shelter", "name": "Shelter", "discovered": True}],
+        "resources": {
+            "food": 5,
+            "water": 5,
+            "medical_supplies": 3,
+            "building_materials": 3,
+        },
+    }
+    action = StructuredAction(
+        actionId=f"registry-{action_type}",
+        actionType=action_type,
+        actor="player_1",
+        target="shelter",
+    )
+
+    result = SimulationEngine(seed=1).apply(world, action)
+
+    assert result.timeConsumed == 1
+    assert result.updatedWorldState["currentTime"] == "09:00"
+    if expected_flag:
+        assert result.updatedWorldState["locations"][0]["flags"][expected_flag] == 1
+        assert result.updatedWorldState["locations"][0]["flagExpiries"][expected_flag] == 6
+    if expected_item:
+        assert result.updatedWorldState["players"][0]["inventory"] == [expected_item]
+    expected_resources = (
+        {"building_materials": -1}
+        if action_type == "fortify"
+        else {"medical_supplies": -1}
+        if action_type == "craft_repair"
+        else {}
+    )
+    assert result.resourceChanges == expected_resources
+
+
+def test_draft_signal_is_not_executable():
+    from action_registry import load_action_registry
+
+    assert load_action_registry()["signal"].status == "draft"
+    with pytest.raises(ValueError, match="Unsupported action type: signal"):
+        SimulationEngine(seed=1).apply(
+            {"players": [{"id": "player_1"}], "locations": [], "resources": {}},
+            StructuredAction(
+                actionId="draft-signal",
+                actionType="signal",
+                actor="player_1",
+                target="nowhere",
+            ),
+        )
+
+
+def test_registry_effect_vocabulary_uses_clamped_player_updates(monkeypatch):
+    from simulation_engine import _ACTION_REGISTRY
+
+    definition = ActionDefinition.model_validate({
+        "id": "fortify",
+        "action_type": "fortify",
+        "label": "Fortify",
+        "category": "utility",
+        "chain_template": "noticed_chain",
+        "time_cost": 2,
+        "effects": [
+            {"type": "change_resource", "resource": "food", "amount": 1},
+            {"type": "change_stat", "stat": "health", "amount": -200},
+            {"type": "move", "target": "actor", "location": "target"},
+            {"type": "remove_status", "target": "actor", "status": "old_status"},
+            {"type": "add_status", "target": "actor", "status": "new_status"},
+            {"type": "remove_item", "target": "actor", "item": "old_tool"},
+            {"type": "add_item", "target": "actor", "item": "new_tool"},
+            {"type": "set_flag", "target": "location", "flag": "signaled", "value": 1},
+        ],
+        "status": "live",
+    })
+    monkeypatch.setitem(_ACTION_REGISTRY, "fortify", definition)
+    world = {
+        "currentDay": 1,
+        "currentTime": "08:00",
+        "players": [{
+            "id": "player_1",
+            "location": "origin",
+            "health": 10,
+            "inventory": ["old_tool"],
+            "statusEffects": [{"id": "old", "name": "old_status"}],
+        }],
+        "locations": [
+            {"id": "origin", "name": "Origin"},
+            {"id": "target", "name": "Target"},
+        ],
+        "resources": {"food": 0},
+    }
+
+    result = SimulationEngine(seed=1).apply(
+        world,
+        StructuredAction(
+            actionId="fortify-effects",
+            actionType="fortify",
+            actor="player_1",
+            target="target",
+        ),
+    )
+    player = result.updatedWorldState["players"][0]
+
+    assert result.timeConsumed == 2
+    assert result.resourceChanges == {"food": 1}
+    assert player["health"] == 0
+    assert player["location"] == "target"
+    assert player["inventory"] == ["new_tool"]
+    assert [effect["name"] for effect in player["statusEffects"]] == ["new_status"]
+    assert result.updatedWorldState["locations"][1]["flags"]["signaled"] == 1
 
 
 def test_policy_action_commits_without_advancing_calendar():
@@ -342,6 +479,123 @@ def test_simulation_sets_deterministic_outcome_tier_for_travel():
 
     assert first.outcomeTier == second.outcomeTier
     assert first.outcomeTier in {"critical_success", "success", "partial_success", "failure", "critical_failure"}
+
+
+@pytest.mark.parametrize("action_type", ["search", "gather", "build", "rest", "reinforce"])
+def test_nontravel_action_at_actor_location_uses_score(action_type):
+    world_state = WorldState.from_dict({
+        "currentDay": 1,
+        "currentTime": "06:00",
+        "players": [{
+            "id": "player_1",
+            "location": "school",
+            "health": 100,
+            "stamina": 100,
+            "stress": 0,
+            "hunger": 0,
+            "statusEffects": [],
+        }],
+        "locations": [{"id": "school", "name": "School", "discovered": True}],
+        "resources": {"food": 10, "water": 10},
+    })
+    action = StructuredAction(
+        actionId=f"same-location-{action_type}",
+        actionType=action_type,
+        actor="player_1",
+        target="school",
+        parameters={"seed": 17},
+    )
+
+    result = SimulationEngine(seed=17).apply(world_state, action)
+
+    assert result.outcomeTier in {"success", "critical_success", "partial_success"}
+
+
+def test_travel_to_actor_location_still_fails():
+    world_state = WorldState.from_dict({
+        "currentDay": 1,
+        "players": [{
+            "id": "player_1",
+            "location": "school",
+            "health": 100,
+            "stamina": 100,
+            "stress": 0,
+            "statusEffects": [],
+        }],
+        "locations": [{"id": "school", "name": "School", "discovered": True}],
+    })
+    action = StructuredAction(
+        actionId="same-location-travel",
+        actionType="travel",
+        actor="player_1",
+        target="school",
+        parameters={"seed": 17},
+    )
+
+    result = SimulationEngine(seed=17).apply(world_state, action)
+
+    assert result.outcomeTier == "failure"
+
+
+@pytest.mark.parametrize(
+    ("policy", "initial_stats"),
+    [
+        (
+            {"actionType": "personal_development", "focus": "rest and recover"},
+            {"health": 100, "stamina": 100, "stress": 100, "hunger": 100},
+        ),
+        (
+            {"actionType": "resource_policy", "focus": "search supplies"},
+            {"health": 3, "stamina": 3, "stress": 100, "hunger": 0},
+        ),
+    ],
+    ids=["rest", "injury-heavy"],
+)
+def test_player_stats_stay_in_range_over_60_policy_days(policy, initial_stats):
+    world_state = WorldState.from_dict({
+        "currentDay": 1,
+        "currentTime": "06:00",
+        "players": [{
+            "id": "player_1",
+            "location": "school",
+            "statusEffects": [],
+            **initial_stats,
+        }],
+        "locations": [{
+            "id": "school",
+            "name": "School",
+            "discovered": True,
+            "zombiePopulation": 30,
+            "dangerLevel": 5,
+        }],
+        "resources": {"food": 10, "water": 10},
+    })
+    engine = SimulationEngine(seed=31)
+    tick = WorldTick(seed=31)
+    injury_observed = False
+
+    for day in range(1, 61):
+        result = engine.auto_resolve_policy_day(
+            world_state,
+            "player_1",
+            policy,
+            day_index=day,
+        )
+        player_after_action = result.updatedWorldState["players"][0]
+        injury_observed = injury_observed or bool(player_after_action.get("statusEffects"))
+        world_state = WorldState.from_dict(result.updatedWorldState)
+        world_state = tick.advance(
+            world_state,
+            WorldEventQueue(),
+            hours=24,
+            run_autopilot=False,
+        )
+
+        for player in world_state.to_dict()["players"]:
+            assert all(0 <= player.get(stat, 0) <= 100 for stat in ("health", "stamina", "stress", "hunger"))
+
+    if policy["actionType"] == "resource_policy":
+        assert injury_observed
 
 
 def test_simulation_applies_status_effect_to_failed_physical_action():

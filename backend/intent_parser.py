@@ -11,6 +11,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from game_data import TACTICAL_ACTION_TYPES
+from location_lookup import resolve_location_id
 from simulation_engine import StructuredAction
 from world_state import WorldState
 
@@ -23,11 +24,12 @@ class ParsedIntent:
 
 class IntentParser:
     _TACTICAL_ACTION_TYPES = frozenset(TACTICAL_ACTION_TYPES)
-    _SPECIAL_ACTION_TYPES = frozenset({"reinforce", "search"})
+    _SPECIAL_ACTION_TYPES = frozenset({"reinforce", "search", "fortify"})
 
     def __init__(self) -> None:
         self._action_patterns = {
-            "reinforce": re.compile(r"\breinforce\b|\bfortify\b|\bboard up\b", re.IGNORECASE),
+            "reinforce": re.compile(r"\breinforce\b|\bboard up\b", re.IGNORECASE),
+            "fortify": re.compile(r"\bfortify\b", re.IGNORECASE),
             "search": re.compile(r"\bsearch\b|\bscout\b|\bcheck\b", re.IGNORECASE),
             "scavenge": re.compile(r"\bscavenge\b|\bloot\b|\bsalvage\b|\braid\b.*\bsupplies\b", re.IGNORECASE),
             "gather": re.compile(r"\bgather\b|\bcollect\b", re.IGNORECASE),
@@ -53,6 +55,30 @@ class IntentParser:
         for clause in clauses:
             clause_lower = clause.lower()
             matched_builtin = False
+            if self._action_patterns["fortify"].search(clause_lower):
+                matched_builtin = True
+                target = self._extract_target(clause, default="school")
+                validation_error = self._validate_action(
+                    "fortify",
+                    actor,
+                    target,
+                    normalized,
+                )
+                if validation_error:
+                    return ParsedIntent([], validation_error)
+                actions.append(
+                    StructuredAction(
+                        actionId=f"fortify-{len(actions)+1}",
+                        actionType="fortify",
+                        actor=actor,
+                        target=target,
+                        parameters={"target": target},
+                        timeCost=1,
+                        resourceCost={},
+                        risks=["exposure"],
+                        prerequisites=[],
+                    )
+                )
             if self._action_patterns["reinforce"].search(clause_lower):
                 matched_builtin = True
                 target = self._extract_target(clause, default="school")
@@ -176,21 +202,24 @@ class IntentParser:
         return "player 2" in text.lower() or "player2" in text.lower()
 
     def _validate_action(self, action_type: str, actor: str, target: str, world_state: dict[str, Any]) -> str | None:
-        if not self._has_location(world_state, target):
+        target_id = resolve_location_id(world_state, target)
+        if target_id is None:
             return f"Unknown location: {target}."
 
         actor_player = self._find_player(world_state, actor)
-        location = self._find_location(world_state, target)
-        actor_location = actor_player.get("location") if actor_player else None
+        actor_location = (
+            resolve_location_id(world_state, actor_player.get("location"))
+            if actor_player else None
+        )
 
-        if action_type == "search" and actor_location != target:
-            distance = self._distance(actor_location, target, world_state)
+        if action_type == "search" and actor_location != target_id:
+            distance = self._distance(actor_location, target_id, world_state)
             if distance > 10:
                 return "Action requires travel first.\nEstimated travel time: 2 days."
         return None
 
     def _has_location(self, world_state: dict[str, Any], target: str) -> bool:
-        return any(item.get("id") == target for item in world_state.get("locations", []))
+        return resolve_location_id(world_state, target) is not None
 
     def _find_player(self, world_state: dict[str, Any], actor_id: str) -> dict[str, Any] | None:
         for player in world_state.get("players", []):
@@ -199,16 +228,32 @@ class IntentParser:
         return None
 
     def _find_location(self, world_state: dict[str, Any], target: str) -> dict[str, Any] | None:
-        for location in world_state.get("locations", []):
-            if location.get("id") == target:
+        location_id = resolve_location_id(world_state, target)
+        locations = world_state.get("locations", [])
+        if location_id is None:
+            return None
+        if isinstance(locations, dict):
+            location = locations.get(location_id)
+            if isinstance(location, dict):
                 return location
+            return next(
+                (item for item in locations.values() if isinstance(item, dict) and item.get("id") == location_id),
+                None,
+            )
+        if isinstance(locations, list):
+            return next(
+                (item for item in locations if isinstance(item, dict) and item.get("id") == location_id),
+                None,
+            )
         return None
 
     def _distance(self, actor_location: str | None, target: str, world_state: dict[str, Any]) -> int:
-        if not actor_location or actor_location == target:
+        actor_location_id = resolve_location_id(world_state, actor_location)
+        target_id = resolve_location_id(world_state, target)
+        if not actor_location_id or actor_location_id == target_id:
             return 0
-        actor_location_data = self._find_location(world_state, actor_location)
-        target_location_data = self._find_location(world_state, target)
+        actor_location_data = self._find_location(world_state, actor_location_id)
+        target_location_data = self._find_location(world_state, target_id)
         if not actor_location_data or not target_location_data:
             return 0
         actor_coords = actor_location_data.get("coordinates", {})

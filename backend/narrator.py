@@ -2,13 +2,25 @@ from __future__ import annotations
 
 from typing import Any
 
+from location_lookup import resolve_location_id
 from simulation_engine import StructuredAction, SimulationResult
 from world_state import settlement_tier
 
 
 def _find_location_name(world_state: dict[str, Any], location_id: str) -> str:
-    for location in world_state.get("locations", []):
-        if location.get("id") == location_id:
+    resolved_id = resolve_location_id(world_state, location_id)
+    locations = world_state.get("locations", [])
+    if isinstance(locations, dict):
+        location = locations.get(resolved_id)
+        if isinstance(location, dict):
+            return location.get("name", location_id)
+    location_values = (
+        locations.values() if isinstance(locations, dict)
+        else locations if isinstance(locations, list)
+        else []
+    )
+    for location in location_values:
+        if isinstance(location, dict) and location.get("id") == resolved_id:
             return location.get("name", location_id)
     return location_id
 
@@ -123,8 +135,15 @@ def narrate_simulation_result(
         lines.append("You send out a mission on your behalf.")
     elif action.actionType == "establish_settlement":
         settlements = result.updatedWorldState.get("settlements", [])
+        target_location_id = resolve_location_id(
+            result.updatedWorldState,
+            action.target,
+        ) or action.target
         settlement = next(
-            (item for item in settlements if item.get("location") == action.target),
+            (
+                item for item in settlements
+                if item.get("location") == target_location_id
+            ),
             None,
         )
         if settlement is None:
@@ -166,6 +185,25 @@ def narrate_simulation_result(
         lines.append("A hostile encounter occurs.")
     else:
         lines.append("You avoid a hostile encounter this time.")
+
+    encounter_outcome = getattr(result, "encounterOutcome", None)
+    if isinstance(encounter_outcome, dict):
+        outcome_text = {
+            "evaded": "The encounter is evaded.",
+            "close_call": "The encounter ends in a close call.",
+            "hurt": "The encounter leaves you hurt.",
+            "serious": "The encounter causes serious harm.",
+        }.get(encounter_outcome.get("outcome"), "The encounter is resolved.")
+        lines.append(outcome_text)
+        reasons = encounter_outcome.get("reasons", [])
+        reason_text = [
+            f"{'helps' if reason.get('effect') == 'helps' else 'hurts'}: "
+            f"{reason.get('explanation')}"
+            for reason in reasons
+            if isinstance(reason, dict) and reason.get("explanation")
+        ]
+        if reason_text:
+            lines.append("Encounter factors: " + "; ".join(reason_text))
 
     lines.extend(_summarize_world_events(result.worldEventsTriggered))
 

@@ -1,0 +1,107 @@
+[
+  {
+    "id": "location_danger_gate",
+    "log_source": "location_danger",
+    "order": 10,
+    "label": "Location danger",
+    "category": "location",
+    "kind": "situation",
+    "role": "modifier",
+    "applies_to": {"step_kinds": ["gate"]},
+    "calc": {
+      "type": "linear",
+      "input": "location.dangerLevel",
+      "per_unit": 0.04,
+      "unit_size": 1,
+      "floor": false,
+      "clamp_min": 0
+    },
+    "explanation": "Dangerous places make it more likely that activity is noticed.",
+    "status": "live",
+    "source": "human"
+  },
+  {
+    "id": "location_danger_encounter",
+    "log_source": "location_danger",
+    "order": 10,
+    "label": "Location danger",
+    "category": "location",
+    "kind": "situation",
+    "role": "modifier",
+    "applies_to": {"step_kinds": ["encounter"]},
+    "calc": {
+      "type": "linear",
+      "input": "location.dangerLevel",
+      "per_unit": 0.03,
+      "unit_size": 1,
+      "floor": false,
+      "clamp_min": 0
+    },
+    "explanation": "Dangerous places increase the chance of a hostile encounter.",
+    "status": "live",
+    "source": "human"
+  },
+  {
+    "id": "zombie_population",
+    "order": 20,
+    "label": "Zombie population",
+    "category": "location",
+    "kind": "situation",
+    "role": "modifier",
+    "applies_to": {"step_kinds": ["gate"]},
+    "calc": {
+      "type": "linear",
+      "input": "location.zombiePopulation",
+      "per_unit": 0.02,
+      "unit_size": 5,
+      "floor": true,
+      "clamp_min": 0
+    },
+    "cap": 0.1,
+    "explanation": "Larger zombie populations make it more likely that activity is noticed.",
+    "status": "live",
+    "source": "human"
+  },
+  {
+    "id": "fortified_gate",
+    "order": 21,
+    "label": "Fortified location",
+    "category": "location",
+    "kind": "situation",
+    "role": "counter",
+    "applies_to": {"step_kinds": ["gate"]},
+    "calc": {
+      "type": "linear",
+      "input": "location.fortified",
+      "per_unit": 0.08,
+      "unit_size": 1,
+      "floor": false,
+      "max_units": 1
+    },
+    "cap": 0.08,
+    "explanation": "Fortifications reduce noise and the chance of being noticed.",
+    "status": "live",
+    "source": "human"
+  },
+  {
+    "id": "fortified_encounter",
+    "order": 11,
+    "label": "Fortified location",
+    "category": "location",
+    "kind": "situation",
+    "role": "counter",
+    "applies_to": {"step_kinds": ["encounter"]},
+    "calc": {
+      "type": "linear",
+      "input": "location.fortified",
+      "per_unit": 0.08,
+      "unit_size": 1,
+      "floor": false,
+      "max_units": 1
+    },
+    "cap": 0.08,
+    "explanation": "Fortifications reduce the chance of a hostile encounter.",
+    "status": "live",
+    "source": "human"
+  }
+]

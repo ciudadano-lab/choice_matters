@@ -1,0 +1,16 @@
+{
+  "id": "build",
+  "action_type": "build",
+  "label": "Build",
+  "category": "tactical",
+  "chain_template": "noise_chain",
+  "time_cost": 1,
+  "required_inputs": ["location"],
+  "effects": [
+    {"type": "change_resource", "resource": "food", "amount": -1},
+    {"type": "change_stat", "stat": "stress", "amount": 1}
+  ],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Build or reinforce infrastructure in place."
+}

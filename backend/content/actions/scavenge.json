@@ -1,0 +1,16 @@
+{
+  "id": "scavenge",
+  "action_type": "scavenge",
+  "label": "Scavenge",
+  "category": "tactical",
+  "chain_template": "noticed_chain",
+  "time_cost": 1,
+  "required_inputs": ["location"],
+  "effects": [
+    {"type": "change_stat", "stat": "stamina", "amount": -1},
+    {"type": "change_stat", "stat": "stress", "amount": 1}
+  ],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Recover resources from a location."
+}

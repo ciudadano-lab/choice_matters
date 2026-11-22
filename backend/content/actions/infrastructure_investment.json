@@ -1,0 +1,13 @@
+{
+  "id": "infrastructure_investment",
+  "action_type": "infrastructure_investment",
+  "label": "Infrastructure investment",
+  "category": "policy",
+  "chain_template": "noise_chain",
+  "time_cost": 0,
+  "required_inputs": ["focus"],
+  "effects": [],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Policy action for fortification, building, and city work."
+}

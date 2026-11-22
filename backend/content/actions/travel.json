@@ -1,0 +1,16 @@
+{
+  "id": "travel",
+  "action_type": "travel",
+  "label": "Travel",
+  "category": "tactical",
+  "chain_template": "travel_chain",
+  "time_cost": 1,
+  "required_inputs": ["location"],
+  "effects": [
+    {"type": "move", "target": "actor", "location": "target"},
+    {"type": "change_stat", "stat": "stamina", "amount": -1}
+  ],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Travel to another location."
+}

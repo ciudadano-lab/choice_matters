@@ -1,0 +1,17 @@
+{
+  "id": "gather",
+  "action_type": "gather",
+  "label": "Gather supplies",
+  "category": "tactical",
+  "chain_template": "noticed_chain",
+  "time_cost": 1,
+  "required_inputs": [],
+  "effects": [
+    {"type": "change_resource", "resource": "food", "amount": 2},
+    {"type": "change_resource", "resource": "water", "amount": 1},
+    {"type": "change_stat", "stat": "hunger", "amount": -2}
+  ],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Gather spoilable local resources."
+}

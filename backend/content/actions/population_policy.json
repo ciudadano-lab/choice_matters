@@ -1,0 +1,13 @@
+{
+  "id": "population_policy",
+  "action_type": "population_policy",
+  "label": "Population policy",
+  "category": "policy",
+  "chain_template": "noticed_chain",
+  "time_cost": 0,
+  "required_inputs": ["focus"],
+  "effects": [],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Policy action for recruitment, morale, and care."
+}

@@ -14,6 +14,14 @@ if str(BACKEND_DIR) not in sys.path:
 from world_state import WorldState, append_world_history_event, settlement_tier
 from simulation_engine import SimulationEngine
 from information_layer import InformationLayer
+from location_lookup import resolve_location_id
+from probability_config import TIME_SLOTS, clamp_player_stat
+from economy import (
+    cap_resource_stores,
+    get_daily_resource_consumption,
+    get_health_recovery_config,
+)
+from encounter_resolution import apply_encounter_outcome, resolve_encounter
 
 
 DEFAULT_STRATEGIC_PERIOD_DAYS = 21
@@ -51,6 +59,78 @@ class WorldTick:
         self.seed = seed
         self.last_period_outcome: dict[str, Any] = {}
 
+    @staticmethod
+    def _time_to_minutes(value: Any) -> int:
+        if not isinstance(value, str) or ":" not in value:
+            return 0
+        try:
+            hour_text, minute_text = value.split(":", 1)
+            return int(hour_text) * 60 + int(minute_text)
+        except (TypeError, ValueError):
+            return 0
+
+    @classmethod
+    def slot_name_for_time(cls, value: Any) -> str:
+        current_minutes = cls._time_to_minutes(value)
+        current_slot = "night"
+        for slot_name, slot_time in TIME_SLOTS:
+            if current_minutes >= cls._time_to_minutes(slot_time):
+                current_slot = slot_name
+            else:
+                break
+        return current_slot
+
+    @classmethod
+    def slot_time_for_name(cls, slot_name: str) -> str:
+        for name, slot_time in TIME_SLOTS:
+            if name == slot_name:
+                return slot_time
+        return "06:00"
+
+    def advance_slot(
+        self,
+        world_state: WorldState | dict[str, Any],
+        event_queue: WorldEventQueue,
+        *,
+        run_autopilot: bool = True,
+        room_state: dict[str, Any] | None = None,
+    ) -> WorldState:
+        state = copy.deepcopy(world_state.to_dict() if hasattr(world_state, "to_dict") else world_state)
+        world = WorldState.from_dict(state)
+
+        if run_autopilot and self._has_active_policy(world):
+            return self._advance_strategic_period(world, event_queue, 6, room_state=room_state)
+
+        current_slot = self.slot_name_for_time(world.currentTime)
+        slot_index = next(
+            (index for index, (slot_name, _) in enumerate(TIME_SLOTS) if slot_name == current_slot),
+            0,
+        )
+        next_slot_index = (slot_index + 1) % len(TIME_SLOTS)
+        next_slot_name, next_time = TIME_SLOTS[next_slot_index]
+        world.currentTime = next_time
+        if next_slot_name == "dawn":
+            world.currentDay += 1
+            for player in world.players:
+                if not isinstance(player, dict):
+                    continue
+                player["hunger"] = clamp_player_stat(player.get("hunger", 0) - 1)
+                player["stress"] = clamp_player_stat(player.get("stress", 0) + 1)
+                for effect in player.get("statusEffects", []):
+                    if isinstance(effect, dict):
+                        mechanical = effect.get("mechanicalEffect", {})
+                        if isinstance(mechanical, dict):
+                            for stat, delta in mechanical.items():
+                                if stat in {"health", "stamina", "hunger", "thirst", "stress"}:
+                                    current = player.get(stat, 0)
+                                    player[stat] = clamp_player_stat(current + int(delta))
+            for location in world.locations:
+                if isinstance(location, dict):
+                    location["zombiePopulation"] = max(0, location.get("zombiePopulation", 0) + 1)
+                    if location.get("zombiePopulation", 0) > 4:
+                        location["dangerLevel"] = min(5, location.get("dangerLevel", 1) + 1)
+        return world
+
     def advance(
         self,
         world_state: WorldState | dict[str, Any],
@@ -78,7 +158,19 @@ class WorldTick:
         weather_options = ["clear", "rain", "storm"]
         world.weather = weather_options[(self._stable_seed(world.currentDay, self.seed) + hours) % len(weather_options)]
 
+        daily_consumption = get_daily_resource_consumption()
+        living_players = sum(
+            player.get("alive", True) is not False and player.get("health", 100) > 0
+            for player in world.players
+        )
+        food_available = world.resources.get("food", 0) >= (
+            daily_consumption["food"] * living_players
+        )
+        water_available = world.resources.get("water", 0) >= (
+            daily_consumption["water"] * living_players
+        )
         for player in world.players:
+            health_before_effects = player.get("health", 100)
             active_effects: list[dict[str, Any]] = []
             for effect in player.get("statusEffects", []):
                 if not isinstance(effect, dict):
@@ -89,7 +181,7 @@ class WorldTick:
                     for stat, delta in mechanical.items():
                         if stat in {"health", "stamina", "hunger", "stress"}:
                             current = player.get(stat, 0)
-                            player[stat] = max(0, current + int(delta))
+                            player[stat] = clamp_player_stat(current + int(delta))
                 if expires_day is None:
                     active_effects.append(effect)
                     continue
@@ -100,8 +192,56 @@ class WorldTick:
                 else:
                     continue
             player["statusEffects"] = active_effects
-            player["hunger"] = max(0, player.get("hunger", 0) - 1)
-            player["stress"] = max(0, player.get("stress", 0) + 1)
+            recovery = get_health_recovery_config()
+            if food_available:
+                player["hunger"] = min(
+                    50,
+                    clamp_player_stat(
+                        player.get("hunger", 50)
+                        + recovery["fed_satiety_recovery_per_day"]
+                    ),
+                )
+            else:
+                player["hunger"] = clamp_player_stat(
+                    player.get("hunger", 50)
+                    - recovery["empty_food_satiety_loss_per_day"]
+                )
+            if water_available:
+                player["thirst"] = min(
+                    50,
+                    clamp_player_stat(
+                        player.get("thirst", 50)
+                        + recovery["fed_satiety_recovery_per_day"]
+                    ),
+                )
+            else:
+                player["thirst"] = clamp_player_stat(
+                    player.get("thirst", 50)
+                    - recovery["empty_water_satiety_loss_per_day"]
+                )
+            player["stress"] = clamp_player_stat(player.get("stress", 0) + 1)
+            health = clamp_player_stat(player.get("health", 100))
+            death_cause = None
+            if health <= 0 and health_before_effects > 0:
+                death_cause = "combat/injury"
+                player["deathCause"] = death_cause
+            elif health > 0:
+                if (
+                    world.resources.get("food", 0)
+                    >= recovery["health_regen_min_food"] * living_players
+                    and world.resources.get("water", 0)
+                    >= recovery["health_regen_min_water"] * living_players
+                ):
+                    health += recovery["health_regen_per_day"]
+                if not food_available and player["hunger"] <= 0:
+                    health -= recovery["starvation_health_loss_per_day"]
+                    death_cause = "starvation"
+                if not water_available and player["thirst"] <= 0:
+                    health -= recovery["dehydration_health_loss_per_day"]
+                    death_cause = "dehydration"
+                player["health"] = clamp_player_stat(health)
+                if player["health"] <= 0 and death_cause is not None:
+                    player["deathCause"] = death_cause
 
         for location in world.locations:
             location["zombiePopulation"] = max(0, location.get("zombiePopulation", 0) + 1)
@@ -119,8 +259,20 @@ class WorldTick:
         self._simulate_factions(world, hours, event_queue=event_queue)
         self._simulate_settlements(world)
 
-        world.resources["food"] = max(0, world.resources.get("food", 0) - 1)
-        world.resources["water"] = max(0, world.resources.get("water", 0) - 1)
+        world.resources["food"] = max(
+            0,
+            world.resources.get("food", 0)
+            - daily_consumption["food"] * living_players,
+        )
+        world.resources["water"] = max(
+            0,
+            world.resources.get("water", 0)
+            - daily_consumption["water"] * living_players,
+        )
+        world.resources = cap_resource_stores(
+            world.resources,
+            len(world.players),
+        )
 
         if world.resources.get("food", 0) < 2:
             world.activeEvents.append({"type": "food_shortage", "day": world.currentDay, "summary": "Food supplies are running low."})
@@ -215,14 +367,29 @@ class WorldTick:
                     continue
                 actor_id = str(player.get("id", ""))
                 result = engine.auto_resolve_policy_day(world, actor_id, policy, world.currentDay)
+                action = result.resolvedAction
+                if result.encounterOccurred:
+                    if action is None:
+                        raise RuntimeError("Triggered encounter is missing its resolved action")
+                    result = self.resolve_encounter_after_action(
+                        world,
+                        result,
+                        action,
+                        seed=action.parameters.get("seed", self.seed),
+                    )
                 world = WorldState.from_dict(result.updatedWorldState)
                 self._apply_tactical_side_effects(world, result, actor_id, room_state)
-                daily_outcomes.append({
+                daily_outcome = {
                     "day": world.currentDay,
                     "playerId": actor_id,
                     "actionType": result.actionType,
                     "outcomeTier": result.outcomeTier,
-                })
+                }
+                if result.encounterOutcome is not None:
+                    daily_outcome["encounterOutcome"] = copy.deepcopy(
+                        result.encounterOutcome
+                    )
+                daily_outcomes.append(daily_outcome)
             world = self.advance(world, event_queue, hours=24, run_autopilot=False)
 
         if daily_outcomes:
@@ -245,6 +412,68 @@ class WorldTick:
             self.last_period_outcome = {}
         return world
 
+    def resolve_encounter_after_action(
+        self,
+        state: WorldState | dict[str, Any],
+        result: Any,
+        action: Any,
+        *,
+        seed: int | None = None,
+    ) -> Any:
+        if not result.encounterOccurred:
+            return result
+        state_dict = state.to_dict() if hasattr(state, "to_dict") else state
+        players = state_dict.get("players", []) if isinstance(state_dict, dict) else []
+        if isinstance(players, dict):
+            player = players.get(action.actor)
+        elif isinstance(players, list):
+            player = next(
+                (
+                    item for item in players
+                    if isinstance(item, dict) and item.get("id") == action.actor
+                ),
+                None,
+            )
+        else:
+            player = None
+        if not isinstance(player, dict):
+            raise ValueError(f"Encounter actor {action.actor!r} is missing")
+
+        outcome = resolve_encounter(
+            state,
+            player,
+            action,
+            result,
+            self.seed if seed is None else seed,
+        )
+        result.updatedWorldState = apply_encounter_outcome(
+            result.updatedWorldState,
+            action.actor,
+            outcome,
+        )
+        result.encounterOutcome = outcome.to_dict()
+        result.encounterDetails = {
+            **result.encounterDetails,
+            "resolution": outcome.to_dict(),
+        }
+        event = {
+            "type": "encounter_resolution",
+            "day": int(state_dict.get("currentDay", 1)),
+            "summary": f"Encounter resolved as {outcome.outcome}.",
+            "payload": outcome.to_dict(),
+        }
+        result.worldEventsTriggered.append(event)
+        updated_state = result.updatedWorldState
+        updated_world = (
+            updated_state["world_state"]
+            if isinstance(updated_state, dict)
+            and isinstance(updated_state.get("world_state"), dict)
+            else updated_state
+        )
+        if isinstance(updated_world, dict):
+            updated_world.setdefault("activeEvents", []).append(copy.deepcopy(event))
+        return result
+
     def _apply_tactical_side_effects(
         self,
         world: WorldState,
@@ -255,7 +484,12 @@ class WorldTick:
         if result.actionType in {"search", "travel"} and result.informationDiscovered:
             source = "direct_observation" if result.actionType == "search" else "survivor_report"
             actor = next((player for player in world.players if player.get("id") == actor_id), None)
-            target_location = actor.get("location", "") if actor else ""
+            target_location = resolve_location_id(
+                world.to_dict(),
+                actor.get("location"),
+            ) if actor else None
+            if target_location is None:
+                target_location = ""
             for info in result.informationDiscovered:
                 _information_layer.apply_information(
                     world,

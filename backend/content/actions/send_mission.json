@@ -1,0 +1,16 @@
+{
+  "id": "send_mission",
+  "action_type": "send_mission",
+  "label": "Send mission",
+  "category": "utility",
+  "chain_template": "noticed_chain",
+  "time_cost": 1,
+  "required_inputs": [],
+  "effects": [
+    {"type": "change_resource", "resource": "water", "amount": -1},
+    {"type": "change_stat", "target": "target", "stat": "stress", "amount": 2}
+  ],
+  "status": "live",
+  "source": "legacy",
+  "notes": "Assign a mission to a survivor or faction."
+}
