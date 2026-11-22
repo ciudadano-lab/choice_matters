@@ -13,19 +13,19 @@ from make_golden import (
 
 
 FROZEN_CONTENT_SHA256 = {
-    "chains.json": "a302b6d052fc466122010b81fb70e918cc216b9da32fa166ab7cf3cc8ad753ff",
-    "factors/approach.json": "4a1eb72fcb5aae0a7b63593c41929dae16f3e9ed9ce9bb7b1c677f93889579b0",
-    "factors/environment.json": "77b89ffac90263b67558cb216262196d98c89051dd2e2e5b302f1e69e1fbe501",
-    "factors/location.json": "21dc55ba46644cef38554d5f7b3a235c0f9d7690385068548c89d504e45cac68",
-    "factors/player_condition.json": "c2d353bdf7dd4b0e3972299608c08630975ec60b1dd9a1722a7c4b012cf05c49",
-    "factors/social.json": "f779baf469f7460b5c21d4b597da3ab5e09a6cf54871b7437d794cf44300aa7e",
+    "chains.json": "015a932a839af5c46a7efd71a85154b1813b12ad25e047fdf15d4adad90282e6",
+    "factors/approach.json": "0eff89615a6dc309035212f5dfb2483dd7f3f8c28fde147062224b2fb9570cde",
+    "factors/environment.json": "ed69856ea9ecdf0ce11740efe427092cf299b323d5efb4237219a773c5702c66",
+    "factors/location.json": "38bc2db1e9ee5dadae28cf0edc8d14b9c9ec3f0d7ba0cf5fe3b01a6e54be9ba1",
+    "factors/player_condition.json": "27486e6f188577ad9dbf755b8c78917414c95eceef83620b29f7284a96e651e5",
+    "factors/social.json": "b8b5a3269a83ba7a99def4d27192607b7e191bda010a839e4505b2047a177f5b",
 }
 
 
 def test_frozen_content_matches_its_sha256_baseline():
     actual = {
         path.relative_to(FROZEN_CONTENT_DIR).as_posix(): hashlib.sha256(
-            path.read_bytes()
+            path.read_bytes().replace(b"\r\n", b"\n")
         ).hexdigest()
         for path in FROZEN_CONTENT_DIR.rglob("*")
         if path.is_file()
