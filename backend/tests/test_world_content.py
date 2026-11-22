@@ -23,7 +23,7 @@ def test_world_content_is_strict_and_references_are_valid():
             "ideology_tags": [],
             "goals": [],
             "strength": 1,
-            "population": 1,
+            "roaming_population": 0,
             "military_strength": 1,
             "resources": {},
             "territory_types": [],

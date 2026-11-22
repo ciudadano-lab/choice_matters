@@ -7,7 +7,7 @@
       "ideology_tags": ["survival", "cooperation"],
       "goals": ["stay_alive", "secure_shelter"],
       "strength": 2,
-      "population": 12,
+      "roaming_population": 4,
       "military_strength": 2,
       "resources": {
         "water": 24,
@@ -35,7 +35,7 @@
       "ideology_tags": ["resourcefulness", "independence"],
       "goals": ["secure_supplies", "control_trade_routes"],
       "strength": 3,
-      "population": 9,
+      "roaming_population": 3,
       "military_strength": 3,
       "resources": {
         "water": 20,
@@ -63,7 +63,7 @@
       "ideology_tags": ["security", "order"],
       "goals": ["protect_civilians", "secure_shelter"],
       "strength": 2,
-      "population": 10,
+      "roaming_population": 3,
       "military_strength": 3,
       "resources": {
         "water": 22,

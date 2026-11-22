@@ -41,7 +41,7 @@ class FactionSeed(StrictContentModel):
     ideology_tags: tuple[str, ...]
     goals: tuple[str, ...]
     strength: StrictInt = Field(ge=0)
-    population: StrictInt = Field(gt=0)
+    roaming_population: StrictInt = Field(ge=0)
     military_strength: StrictInt = Field(ge=0)
     resources: dict[str, StrictInt]
     territory_types: tuple[str, ...]
@@ -56,6 +56,41 @@ class FactionsContent(StrictContentModel):
     factions: tuple[FactionSeed, ...]
 
 
+class SettlementDailyRules(StrictContentModel):
+    population_unit: StrictInt = Field(gt=0)
+    consumption_per_unit: dict[str, StrictInt]
+    production_action: Literal["gather"]
+    production_multiplier: StrictInt = Field(ge=0)
+    production_divisor: StrictInt = Field(gt=0)
+    max_store_change: StrictInt = Field(gt=0)
+    store_caps: dict[str, StrictInt]
+    max_stat_change: StrictInt = Field(gt=0)
+    morale_supplied_delta: StrictInt
+    morale_depleted_delta: StrictInt
+    morale_target: StrictInt = Field(ge=0, le=100)
+    unrest_supplied_delta: StrictInt
+    unrest_depleted_delta: StrictInt
+
+
+class SettlementWeeklyRules(StrictContentModel):
+    interval_days: StrictInt = Field(gt=0)
+    population_growth: StrictInt = Field(ge=0)
+    population_decline: StrictInt = Field(ge=0)
+    population_cap: StrictInt = Field(ge=0)
+    max_population_change: StrictInt = Field(gt=0)
+    roaming_population_cap: StrictInt = Field(ge=0)
+    defense_supplied_delta: StrictInt
+    defense_depleted_delta: StrictInt
+    max_stat_change: StrictInt = Field(gt=0)
+
+
+class SettlementHysteresis(StrictContentModel):
+    pressure_resources: tuple[str, ...]
+    worsening_days: StrictInt = Field(gt=1)
+    recovery_days: StrictInt = Field(gt=0)
+    recovery_margin: StrictInt = Field(ge=0)
+
+
 class SettlementDefaults(StrictContentModel):
     morale: StrictInt = Field(ge=0, le=100)
     unrest: StrictInt = Field(ge=0, le=100)
@@ -64,6 +99,12 @@ class SettlementDefaults(StrictContentModel):
     coordinates: dict[str, StrictInt]
     status: SettlementStatus
     needs_thresholds: dict[str, StrictInt]
+    legacy_grace_days: StrictInt = Field(ge=0)
+    foundation_grant: dict[str, StrictInt]
+    daily: SettlementDailyRules
+    weekly: SettlementWeeklyRules
+    hysteresis: SettlementHysteresis
+    max_events_per_day: StrictInt = Field(gt=0)
 
 
 class SettlementSeed(StrictContentModel):

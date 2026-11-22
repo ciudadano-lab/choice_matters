@@ -42,10 +42,18 @@ def settlement_tier(population: int) -> int:
 def normalize_settlement_record(
     settlement: dict[str, Any],
     content: WorldContent | None = None,
+    *,
+    current_day: int = 1,
 ) -> dict[str, Any]:
     world_content = content or load_world_content()
     defaults = world_content.settlements.defaults
     normalized = copy.deepcopy(settlement)
+    legacy_shape = (
+        not isinstance(settlement.get("stores"), dict)
+        or "location_id" not in settlement
+        or "faction_id" not in settlement
+        or "leader_npc_id" not in settlement
+    )
 
     location_id = normalized.get("location_id", normalized.get("location"))
     if not isinstance(location_id, str):
@@ -93,6 +101,13 @@ def normalize_settlement_record(
     normalized.setdefault("faction_id", "faction_survivors")
     normalized.setdefault("leader_npc_id", None)
     normalized.setdefault("founderId", normalized.get("founder_id"))
+    if legacy_shape:
+        if not isinstance(normalized.get("legacy_grace_until_day"), int):
+            normalized["legacy_grace_until_day"] = (
+                max(1, current_day) + defaults.legacy_grace_days
+            )
+    normalized.setdefault("status_pressure_ticks", 0)
+    normalized.setdefault("status_recovery_ticks", 0)
 
     normalized["needs"] = sorted(
         resource
@@ -134,7 +149,19 @@ def _seed_world_entities(
         factions.append({
             "id": faction_seed.id,
             "name": faction_seed.name,
-            "population": faction_seed.population,
+            "population": faction_seed.roaming_population
+            + sum(
+                settlement.population
+                for settlement in content.settlements.settlements
+                if settlement.faction_id == faction_seed.id
+            ),
+            "population_last_derived": faction_seed.roaming_population
+            + sum(
+                settlement.population
+                for settlement in content.settlements.settlements
+                if settlement.faction_id == faction_seed.id
+            ),
+            "roaming_population": faction_seed.roaming_population,
             "strength": faction_seed.strength,
             "militaryStrength": faction_seed.military_strength,
             "resources": copy.deepcopy(faction_seed.resources),
@@ -1277,6 +1304,7 @@ class WorldState:
     npcs: dict[str, dict[str, Any]] = field(default_factory=dict)
     resources: dict[str, Any] = field(default_factory=dict)
     activeEvents: list[dict[str, Any]] = field(default_factory=list)
+    internalEvents: list[dict[str, Any]] = field(default_factory=list)
     discoveredInformation: list[dict[str, Any]] = field(default_factory=list)
     rumors: list[dict[str, Any]] = field(default_factory=list)
     worldHistory: list[dict[str, Any]] = field(default_factory=list)
@@ -1357,7 +1385,10 @@ class WorldState:
             players=_coerce_list(raw.get("players"), []),
             factions=_coerce_list(raw.get("factions"), []),
             settlements=[
-                normalize_settlement_record(item)
+                normalize_settlement_record(
+                    item,
+                    current_day=_coerce_int(raw.get("currentDay"), 1),
+                )
                 if isinstance(item, dict)
                 else item
                 for item in _coerce_list(raw.get("settlements"), [])
@@ -1369,6 +1400,7 @@ class WorldState:
             },
             resources=_coerce_dict(raw.get("resources"), {}),
             activeEvents=_coerce_list(raw.get("activeEvents"), []),
+            internalEvents=_coerce_list(raw.get("internalEvents"), []),
             discoveredInformation=_coerce_list(raw.get("discoveredInformation"), []),
             rumors=_coerce_list(raw.get("rumors"), []),
             worldHistory=_coerce_list(raw.get("worldHistory"), []),
@@ -1415,6 +1447,7 @@ class WorldState:
             "npcs": copy.deepcopy(self.npcs),
             "resources": copy.deepcopy(self.resources),
             "activeEvents": copy.deepcopy(self.activeEvents),
+            "internalEvents": copy.deepcopy(self.internalEvents),
             "discoveredInformation": copy.deepcopy(self.discoveredInformation),
             "rumors": copy.deepcopy(self.rumors),
             "worldHistory": copy.deepcopy(self.worldHistory),

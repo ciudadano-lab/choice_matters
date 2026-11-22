@@ -261,37 +261,179 @@ def test_location_resources_regenerate_slowly_from_maximum_snapshot():
     assert resources["food"] <= updated.locations[0]["resourcesMax"]["food"]
 
 
-def test_settlements_grow_deterministically_and_emit_tier_transition_event():
-    seed = next(
-        candidate
-        for candidate in range(100)
-        if WorldTick(seed=candidate)._stable_seed("3:settlement-1", candidate + 23) % 5 > 0
-    )
+def test_settlements_grow_weekly_and_emit_a_deterministic_internal_record():
     world_state = WorldState.from_dict({
-        "currentDay": 2,
+        "currentDay": 1,
+        "currentTime": "06:00",
         "players": [{"id": "player_1", "location": "school"}],
-        "locations": [{"id": "school", "name": "School", "discovered": True}],
+        "locations": [{
+            "id": "school",
+            "name": "School",
+            "type": "school",
+            "discovered": True,
+        }],
         "settlements": [{
             "id": "settlement-1",
             "name": "School Settlement",
+            "location_id": "school",
             "location": "school",
             "coordinates": {"x": 1, "y": 1},
             "population": 30,
+            "stores": {"food": 20, "water": 20},
+            "faction_id": "faction_survivors",
             "foundedDay": 1,
             "founderId": "player_1",
         }],
     })
 
-    first = WorldTick(seed=seed).advance(world_state, WorldEventQueue(), hours=24, run_autopilot=False)
-    second = WorldTick(seed=seed).advance(world_state, WorldEventQueue(), hours=24, run_autopilot=False)
+    first = WorldTick(seed=13).advance(
+        world_state, WorldEventQueue(), hours=7 * 24, run_autopilot=False
+    )
+    second = WorldTick(seed=13).advance(
+        world_state, WorldEventQueue(), hours=7 * 24, run_autopilot=False
+    )
 
     first_settlement = first.settlements[0]
-    assert first_settlement["population"] > 30
+    assert first_settlement["population"] == 31
     assert first_settlement["population"] == second.settlements[0]["population"]
-    transitions = [event for event in first.activeEvents if event.get("type") == "settlement_growth"]
-    assert transitions
-    assert transitions[0]["fromTier"] == 1
-    assert transitions[0]["toTier"] == 2
+    assert first_settlement["tier"] == 2
+    weekly_records = [
+        event for event in first.internalEvents
+        if event.get("type") == "settlement_tick"
+        and event.get("settlementId") == "settlement-1"
+        and event.get("reasons", {}).get("weekly")
+    ]
+    assert weekly_records
+    assert weekly_records[0]["reasons"]["weekly"]["population"] == {
+        "before": 30,
+        "after": 31,
+    }
+
+
+def test_legacy_settlement_grace_and_status_hysteresis():
+    world_state = WorldState.from_dict({
+        "currentDay": 10,
+        "currentTime": "06:00",
+        "players": [],
+        "locations": [{"id": "loc", "name": "Location", "type": "building"}],
+        "settlements": [{
+            "id": "legacy",
+            "location": "loc",
+            "population": 10,
+            "status": "stable",
+        }],
+    })
+    settlement = world_state.settlements[0]
+    assert settlement["stores"]["food"] == 0
+    assert settlement["legacy_grace_until_day"] == 17
+
+    settlement["legacy_grace_until_day"] = 0
+    first = WorldTick(seed=19).advance(
+        world_state, WorldEventQueue(), hours=24, run_autopilot=False
+    )
+    first_settlement = first.settlements[0]
+    assert first_settlement["status"] == "stable"
+    assert first_settlement["status_pressure_ticks"] == 1
+
+    second = WorldTick(seed=19).advance(
+        first, WorldEventQueue(), hours=24, run_autopilot=False
+    )
+    assert second.settlements[0]["status"] == "strained"
+
+
+def test_foundation_grant_transfers_starting_stores_after_settlement_action():
+    world_state = WorldState.from_dict({
+        "currentDay": 1,
+        "currentTime": "06:00",
+        "players": [{
+            "id": "player_1",
+            "location": "school",
+            "currentPolicy": {
+                "actionType": "infrastructure_investment",
+                "focus": "found a settlement",
+                "commitmentDays": 1,
+            },
+        }],
+        "locations": [{
+            "id": "school",
+            "name": "School",
+            "type": "school",
+            "discovered": True,
+            "coordinates": {"x": 0, "y": 0},
+        }],
+        "resources": {
+            "food": 12,
+            "water": 12,
+            "building_materials": 2,
+        },
+    })
+
+    tick = WorldTick(seed=23)
+    updated = tick.advance_policy_day(world_state, WorldEventQueue())
+
+    settlement = next(
+        item for item in updated.settlements
+        if item.get("founderId") == "player_1"
+    )
+    assert settlement["foundation_grant_applied"] is True
+    assert settlement["stores"]["food"] == 6
+    assert settlement["stores"]["water"] == 6
+    assert settlement["stores"]["building_materials"] == 1
+    assert updated.resources["food"] == 3
+    assert updated.resources["water"] == 4
+    assert any(
+        item.get("type") == "settlement_foundation_grant"
+        for item in updated.internalEvents
+    )
+
+
+def test_ninety_day_settlement_fast_forward_is_deterministic():
+    initial = WorldState.from_dict({
+        "currentDay": 1,
+        "currentTime": "06:00",
+        "players": [],
+        "locations": [{
+            "id": "farm",
+            "name": "Farm",
+            "type": "farm",
+        }],
+        "factions": [{
+            "id": "faction_test",
+            "population": 10,
+            "militaryStrength": 1,
+            "resources": {"food": 20, "water": 20},
+            "territory": ["farm"],
+            "ideology": "survival",
+            "relationships": {},
+            "goals": [],
+        }],
+        "settlements": [{
+            "id": "farm_settlement",
+            "location_id": "farm",
+            "location": "farm",
+            "population": 20,
+            "stores": {"food": 30, "water": 30},
+            "faction_id": "faction_test",
+            "morale": 60,
+            "unrest": 10,
+            "defense": 20,
+        }],
+    })
+
+    first = WorldTick(seed=31).advance(
+        initial, WorldEventQueue(), hours=90 * 24, run_autopilot=False
+    )
+    second = WorldTick(seed=31).advance(
+        initial, WorldEventQueue(), hours=90 * 24, run_autopilot=False
+    )
+
+    assert first.to_dict() == second.to_dict()
+    assert first.currentDay == 91
+    assert first.settlements[0]["population"] >= 20
+    assert first.factions[0]["population"] == (
+        first.settlements[0]["population"]
+        + first.factions[0]["roaming_population"]
+    )
 
 
 def test_time_slots_follow_expected_order_and_rollover():

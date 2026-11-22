@@ -19,7 +19,54 @@
       "water": 5,
       "building_materials": 2,
       "medical_supplies": 1
-    }
+    },
+    "legacy_grace_days": 7,
+    "foundation_grant": {
+      "food": 6,
+      "water": 6,
+      "building_materials": 1
+    },
+    "daily": {
+      "population_unit": 10,
+      "consumption_per_unit": {
+        "food": 1,
+        "water": 1
+      },
+      "production_action": "gather",
+      "production_multiplier": 2,
+      "production_divisor": 2,
+      "max_store_change": 8,
+      "store_caps": {
+        "food": 80,
+        "water": 80,
+        "building_materials": 40,
+        "medical_supplies": 20
+      },
+      "max_stat_change": 2,
+      "morale_supplied_delta": 1,
+      "morale_depleted_delta": -2,
+      "morale_target": 65,
+      "unrest_supplied_delta": -1,
+      "unrest_depleted_delta": 2
+    },
+    "weekly": {
+      "interval_days": 7,
+      "population_growth": 1,
+      "population_decline": 1,
+      "population_cap": 200,
+      "max_population_change": 2,
+      "roaming_population_cap": 100,
+      "defense_supplied_delta": 1,
+      "defense_depleted_delta": -1,
+      "max_stat_change": 2
+    },
+    "hysteresis": {
+      "pressure_resources": ["food", "water"],
+      "worsening_days": 2,
+      "recovery_days": 3,
+      "recovery_margin": 5
+    },
+    "max_events_per_day": 100
   },
   "settlements": [
     {

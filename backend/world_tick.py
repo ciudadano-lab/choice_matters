@@ -11,7 +11,7 @@ BACKEND_DIR = Path(__file__).resolve().parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from world_state import WorldState, append_world_history_event, settlement_tier
+from world_state import WorldState, append_world_history_event
 from simulation_engine import SimulationEngine, StructuredAction
 from information_layer import InformationLayer
 from location_lookup import resolve_location_id
@@ -24,6 +24,7 @@ from economy import (
     get_health_recovery_config,
 )
 from encounter_resolution import apply_encounter_outcome, resolve_encounter
+from settlement_tick import SettlementTick
 
 
 DEFAULT_STRATEGIC_PERIOD_DAYS = 21
@@ -61,6 +62,7 @@ class WorldTick:
         self.seed = seed
         self.last_period_outcome: dict[str, Any] = {}
         self.last_policy_day_outcomes: list[dict[str, Any]] = []
+        self.settlement_tick = SettlementTick(seed)
 
     @staticmethod
     def _time_to_minutes(value: Any) -> int:
@@ -250,6 +252,17 @@ class WorldTick:
                         action,
                         seed=action.parameters.get("seed", self.seed),
                     )
+                if result.actionType == "establish_settlement" and action is not None:
+                    target_location_id = resolve_location_id(
+                        result.updatedWorldState,
+                        action.target,
+                    ) or action.target
+                    result.updatedWorldState = self.settlement_tick.apply_foundation_grant(
+                        result.updatedWorldState,
+                        settlement_id=action.actionId,
+                        location_id=target_location_id,
+                        action_id=action.actionId,
+                    )
                 world = WorldState.from_dict(result.updatedWorldState)
                 self._apply_tactical_side_effects(world, result, actor_id, room_state)
                 self.last_policy_day_outcomes.append(
@@ -349,6 +362,7 @@ class WorldTick:
         new_hour = hour % 24
         world.currentDay = new_day
         world.currentTime = f"{new_hour:02d}:{parts[1] if len(parts) > 1 else '00'}"
+        days_elapsed = max(0, new_day - current_day)
 
         weather_options = ["clear", "rain", "storm"]
         world.weather = weather_options[(self._stable_seed(world.currentDay, self.seed) + hours) % len(weather_options)]
@@ -452,7 +466,6 @@ class WorldTick:
             }
 
         self._simulate_factions(world, hours, event_queue=event_queue)
-        self._simulate_settlements(world)
 
         world.resources["food"] = max(
             0,
@@ -468,6 +481,12 @@ class WorldTick:
             world.resources,
             len(world.players),
         )
+        if days_elapsed:
+            world = self.settlement_tick.advance_days(
+                world,
+                days_elapsed,
+                first_day=current_day + 1,
+            )
 
         if world.resources.get("food", 0) < 2:
             world.activeEvents.append({"type": "food_shortage", "day": world.currentDay, "summary": "Food supplies are running low."})
@@ -498,42 +517,6 @@ class WorldTick:
                     self.seed,
                 )
                 current[resource] = min(cap, current_value + growth_seed % 2)
-
-    def _simulate_settlements(self, world: WorldState) -> None:
-        for settlement in world.settlements:
-            if not isinstance(settlement, dict):
-                continue
-            settlement_id = str(settlement.get("id", "settlement"))
-            population_before = max(0, int(settlement.get("population", 0)))
-            tier_before = settlement_tier(population_before)
-            growth_seed = self._stable_seed(
-                f"{world.currentDay}:{settlement_id}",
-                self.seed + 23,
-            )
-            growth = growth_seed % 5
-            settlement["population"] = population_before + growth
-            tier_after = settlement_tier(settlement["population"])
-            settlement["tier"] = tier_after
-            if tier_after == tier_before:
-                continue
-
-            settlement_name = settlement.get("name", settlement_id)
-            summary = f"{settlement_name} has grown into tier {tier_after}."
-            world.activeEvents.append({
-                "type": "settlement_growth",
-                "day": world.currentDay,
-                "summary": summary,
-                "settlementId": settlement_id,
-                "fromTier": tier_before,
-                "toTier": tier_after,
-            })
-            append_world_history_event(world, {
-                "type": "settlement_growth",
-                "description": summary,
-                "day": world.currentDay,
-                "timestamp": world.currentDay,
-                "causes": [settlement_id],
-            })
 
     def _has_active_policy(self, world: WorldState) -> bool:
         return any(

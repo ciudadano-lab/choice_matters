@@ -22,6 +22,7 @@ from tools.harness import (
     build_sweep_rows,
     build_plan_sweep_rows,
     run_play,
+    run_world_sim,
 )
 
 
@@ -143,6 +144,20 @@ def test_world_pause_rate_bounds_player_interrupt_rate():
             assert metrics["world_pause_rate"] == metrics["per_player_interrupt_rate"]
         else:
             assert metrics["world_pause_rate"] >= metrics["per_player_interrupt_rate"]
+
+
+def test_world_sim_reports_settlement_history_and_is_deterministic():
+    first = run_world_sim(days=14, seeds=2)
+    second = run_world_sim(days=14, seeds=2)
+
+    assert first == second
+    assert len(first["runs"]) == 2
+    assert all(len(run["daily"]) == 14 for run in first["runs"])
+    assert all(
+        {"population", "stores", "status_distribution"} <= set(snapshot)
+        for run in first["runs"]
+        for snapshot in run["daily"]
+    )
 
 
 def test_encounter_outcome_target_checks_report_prepared_and_unprepared_bands(capsys):

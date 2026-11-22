@@ -28,7 +28,7 @@ from economy import get_starting_resources
 from probability_config import CHANCE_MAX, CHANCE_MIN, TIME_SLOTS
 from probability_engine import run_chain
 from plan_features import PlanFeatures
-from simulation_engine import SimulationEngine, StructuredAction
+from simulation_engine import StructuredAction
 from world_state import WorldState, generate_initial_world_state
 from world_tick import WorldEventQueue, WorldTick
 
@@ -328,7 +328,6 @@ def _run_game(payload: dict[str, Any]) -> dict[str, Any]:
     if lite:
         world.get("cityLayout", {}).pop("roadNetwork", None)
 
-    engine = SimulationEngine(seed=seed)
     tick = WorldTick(seed=seed)
     library = get_library()
     random_source = random.Random(seed)
@@ -830,6 +829,99 @@ def run_play(
     ]
     rows.sort(key=lambda row: (row["bot"], row["K"], row["seed"], row["day"], row["slot"]))
     return report, rows
+
+
+def run_world_sim(*, days: int, seeds: int) -> dict[str, Any]:
+    if days <= 0 or seeds <= 0:
+        raise ValueError("days and seeds must be positive")
+
+    runs: list[dict[str, Any]] = []
+    for seed in range(1, seeds + 1):
+        world = generate_initial_world_state([], seed)
+        world.players = []
+        tick = WorldTick(seed=seed)
+        daily: list[dict[str, Any]] = []
+        for _ in range(days):
+            world = tick.advance(
+                world,
+                WorldEventQueue(),
+                hours=24,
+                run_autopilot=False,
+            )
+            settlements = sorted(
+                world.settlements,
+                key=lambda settlement: str(settlement.get("id", "")),
+            )
+            status_distribution: dict[str, int] = {}
+            for settlement in settlements:
+                status = str(settlement.get("status", "unknown"))
+                status_distribution[status] = status_distribution.get(status, 0) + 1
+            resources = sorted({
+                resource
+                for settlement in settlements
+                for resource in settlement.get("stores", {})
+            })
+            daily.append({
+                "day": world.currentDay,
+                "status_distribution": status_distribution,
+                "population": sum(
+                    int(settlement.get("population", 0))
+                    for settlement in settlements
+                ),
+                "stores": {
+                    resource: sum(
+                        int(settlement.get("stores", {}).get(resource, 0))
+                        for settlement in settlements
+                    )
+                    for resource in resources
+                },
+            })
+        runs.append({"seed": seed, "daily": daily})
+
+    final_days = [run["daily"][-1] for run in runs]
+    all_statuses = sorted({
+        status
+        for snapshot in final_days
+        for status in snapshot["status_distribution"]
+    })
+    return {
+        "configuration": {"days": days, "seeds": seeds},
+        "runs": runs,
+        "summary": {
+            "final_status_distribution": {
+                status: sum(
+                    snapshot["status_distribution"].get(status, 0)
+                    for snapshot in final_days
+                )
+                for status in all_statuses
+            },
+            "mean_final_population": _mean(
+                snapshot["population"] for snapshot in final_days
+            ),
+            "mean_final_stores": {
+                resource: _mean(
+                    snapshot["stores"].get(resource, 0)
+                    for snapshot in final_days
+                )
+                for resource in sorted({
+                    resource
+                    for snapshot in final_days
+                    for resource in snapshot["stores"]
+                })
+            },
+        },
+    }
+
+
+def _write_world_sim_report(out_dir: Path, report: dict[str, Any]) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with (out_dir / "world_sim.json").open(
+        "w",
+        encoding="utf-8",
+        newline="\n",
+    ) as handle:
+        json.dump(report, handle, indent=2, sort_keys=True, allow_nan=False)
+        handle.write("\n")
 
 
 def _check_determinism(
@@ -1456,6 +1548,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sweep = commands.add_parser("sweep", help="Run the analytic probability-factor sweep.")
     sweep.add_argument("--out", type=Path, default=_default_out())
+
+    world_sim = commands.add_parser(
+        "world_sim",
+        help="Simulate settlements and factions without player actions.",
+    )
+    world_sim.add_argument("--days", type=int, default=100)
+    world_sim.add_argument("--seeds", type=int, default=30)
+    world_sim.add_argument(
+        "--out",
+        type=Path,
+        default=_default_out() / "world_sim",
+    )
     return parser
 
 
@@ -1475,6 +1579,21 @@ def main(argv: list[str] | None = None) -> int:
         )
         _print_search_plan_pivot(rows)
         _print_plan_feature_pivot(build_plan_sweep_rows())
+        return 0
+
+    if args.command == "world_sim":
+        if args.days <= 0 or args.seeds <= 0:
+            parser.error("--days and --seeds must be positive")
+        report = run_world_sim(days=args.days, seeds=args.seeds)
+        _write_world_sim_report(args.out, report)
+        print("World simulation (final status distribution and population/stores):")
+        print(
+            f"days={args.days} seeds={args.seeds} "
+            f"statuses={report['summary']['final_status_distribution']} "
+            f"mean_population={report['summary']['mean_final_population']:.1f} "
+            f"mean_stores={report['summary']['mean_final_stores']}"
+        )
+        print(f"Wrote {args.out / 'world_sim.json'}")
         return 0
 
     players = _parse_csv_values(args.players, cast=int, option="players")
