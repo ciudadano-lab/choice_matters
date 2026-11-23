@@ -1,6 +1,6 @@
 import pytest
 
-from simulation_engine import SimulationEngine
+from simulation_engine import SimulationEngine, StructuredAction
 from game_data import TACTICAL_ACTION_TYPES
 from probability_config import TIME_SLOTS
 from world_state import WorldState
@@ -113,6 +113,69 @@ def test_world_tick_autopilot_resolves_policy_days_and_rolls_up_period():
     ]
     assert all(action_type == "gather" for action_type in primary_actions)
     assert any(event["type"] == "strategic_period_outcome" for event in updated.activeEvents)
+
+
+def test_world_tick_caps_retained_event_and_log_collections():
+    world_state = WorldState.from_dict({
+        "currentDay": 1,
+        "currentTime": "06:00",
+        "players": [],
+        "activeEvents": [
+            {"type": "old", "day": index}
+            for index in range(400)
+        ],
+        "worldHistory": [
+            {"eventId": f"old_{index}", "timestamp": index,
+             "type": "old", "description": "old"}
+            for index in range(250)
+        ],
+        "internalEvents": [
+            {"type": "old", "day": index}
+            for index in range(600)
+        ],
+        "relationships": [
+            {"from": "a", "to": "b", "score": index}
+            for index in range(600)
+        ],
+        "settlements": [],
+        "factions": [],
+        "locations": [],
+    })
+
+    updated = WorldTick(seed=13).advance(
+        world_state,
+        WorldEventQueue(),
+        hours=24,
+        run_autopilot=False,
+    )
+
+    assert len(updated.activeEvents) <= 25
+    assert len(updated.worldHistory) <= 25
+    assert len(updated.internalEvents) <= 50
+    assert len(updated.relationships) <= 50
+
+
+def test_world_tick_deduplicates_and_sorts_faction_territory():
+    world_state = WorldState.from_dict({
+        "currentDay": 1,
+        "currentTime": "06:00",
+        "players": [],
+        "locations": [],
+        "settlements": [],
+        "factions": [{
+            "id": "faction_b",
+            "territory": ["zone", "alpha", "zone"],
+            "population": 1,
+            "militaryStrength": 1,
+            "resources": {},
+            "ideology": "survival",
+            "relationships": {},
+        }],
+    })
+    tick = WorldTick(seed=13)
+    tick._normalize_faction(world_state.factions[0])
+
+    assert world_state.factions[0]["territory"] == ["alpha", "zone"]
 
 
 def test_world_tick_autopilot_biases_alliance_toward_diplomacy():
@@ -385,6 +448,52 @@ def test_foundation_grant_transfers_starting_stores_after_settlement_action():
         item.get("type") == "settlement_foundation_grant"
         for item in updated.internalEvents
     )
+
+
+def test_direct_apply_establish_settlement_also_receives_foundation_grant():
+    world_state = WorldState.from_dict({
+        "currentDay": 1,
+        "currentTime": "06:00",
+        "players": [{
+            "id": "player_1",
+            "location": "school",
+            "health": 100,
+            "stamina": 100,
+        }],
+        "locations": [{
+            "id": "school",
+            "name": "School",
+            "type": "school",
+            "discovered": True,
+            "coordinates": {"x": 0, "y": 0},
+        }],
+        "resources": {
+            "food": 12,
+            "water": 12,
+            "building_materials": 2,
+        },
+    })
+    action = StructuredAction(
+        actionId="direct-foundation",
+        actionType="establish_settlement",
+        actor="player_1",
+        target="school",
+        parameters={},
+        timeCost=1,
+    )
+
+    result = SimulationEngine(seed=23).apply(world_state, action)
+    settlement = next(
+        item for item in result.updatedWorldState["settlements"]
+        if item.get("founderId") == "player_1"
+    )
+
+    assert settlement["foundation_grant_applied"] is True
+    assert settlement["stores"]["food"] == 6
+    assert settlement["stores"]["water"] == 6
+    assert settlement["stores"]["building_materials"] == 1
+    assert result.updatedWorldState["resources"]["food"] == 4
+    assert result.updatedWorldState["resources"]["water"] == 5
 
 
 def test_ninety_day_settlement_fast_forward_is_deterministic():

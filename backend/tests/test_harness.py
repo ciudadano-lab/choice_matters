@@ -23,6 +23,7 @@ from tools.harness import (
     build_plan_sweep_rows,
     run_play,
     run_world_sim,
+    run_world_sim_scenarios,
 )
 
 
@@ -157,6 +158,20 @@ def test_world_sim_reports_settlement_history_and_is_deterministic():
         {"population", "stores", "status_distribution"} <= set(snapshot)
         for run in first["runs"]
         for snapshot in run["daily"]
+    )
+
+
+def test_world_sim_scenarios_report_depleted_and_high_unrest_paths():
+    report = run_world_sim_scenarios(days=20, seeds=2)
+
+    assert set(report["scenarios"]) == {
+        "baseline",
+        "depleted_stores",
+        "high_unrest",
+    }
+    assert all(
+        sum(statuses.values()) == 6
+        for statuses in report["scenarios"].values()
     )
 
 

@@ -26,6 +26,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from world_state import materialize_poi, settlement_tier
+from settlement_tick import SettlementTick
 
 _ACTION_REGISTRY = get_live_actions()
 _REGISTRY_ONLY_ACTIONS = frozenset({"fortify", "craft_repair"})
@@ -402,6 +403,16 @@ class SimulationEngine:
             result = self._empty_result(action, 0, {})
         else:
             result = self._resolve_establish_settlement(state, action, rng)
+            if action.actionType == "establish_settlement":
+                target_location_id = resolve_location_id(state, action.target) or action.target
+                granted_state = SettlementTick(seed=rng).apply_foundation_grant(
+                    state,
+                    settlement_id=action.actionId,
+                    location_id=target_location_id,
+                    action_id=action.actionId,
+                )
+                state.clear()
+                state.update(granted_state)
 
         definition = _ACTION_REGISTRY.get(action.actionType)
         if definition is not None and result.get("worldEventsTriggered"):

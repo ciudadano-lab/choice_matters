@@ -136,12 +136,12 @@ def _seed_world_entities(
     )
     factions: list[dict[str, Any]] = []
     for faction_seed in sorted(content.factions.factions, key=lambda item: item.id):
-        territory = sorted(
+        territory = sorted(set(
             location["id"]
             for location in locations
             if location.get("type") in faction_seed.territory_types
             and isinstance(location.get("id"), str)
-        )
+        ))
         relationships = {
             target_id: faction_seed.initial_dispositions[target_id]
             for target_id in sorted(faction_ids - {faction_seed.id})

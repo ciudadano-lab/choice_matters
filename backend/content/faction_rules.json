@@ -7,5 +7,11 @@
     "protect_civilians"
   ],
   "faction_disposition_scale_factor": 5,
-  "surface_faction_events_to_active_events": true
+  "surface_faction_events_to_active_events": true,
+  "retention": {
+    "active_events": 25,
+    "world_history": 25,
+    "internal_events": 50,
+    "relationships": 50
+  }
 }

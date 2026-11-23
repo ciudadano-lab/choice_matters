@@ -144,10 +144,18 @@ class NpcsContent(StrictContentModel):
     npcs: tuple[NpcSeed, ...]
 
 
+class RetentionPolicy(StrictContentModel):
+    active_events: StrictInt = Field(gt=0)
+    world_history: StrictInt = Field(gt=0)
+    internal_events: StrictInt = Field(gt=0)
+    relationships: StrictInt = Field(gt=0)
+
+
 class FactionRules(StrictContentModel):
     goal_vocabulary: tuple[str, ...]
     faction_disposition_scale_factor: StrictInt = Field(gt=0)
     surface_faction_events_to_active_events: bool = True
+    retention: RetentionPolicy
 
 
 class WorldContent(StrictContentModel):

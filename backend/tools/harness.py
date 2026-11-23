@@ -831,14 +831,29 @@ def run_play(
     return report, rows
 
 
-def run_world_sim(*, days: int, seeds: int) -> dict[str, Any]:
+def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[str, Any]:
     if days <= 0 or seeds <= 0:
         raise ValueError("days and seeds must be positive")
+    if scenario not in {"baseline", "depleted_stores", "high_unrest"}:
+        raise ValueError(f"Unknown world_sim scenario: {scenario}")
 
     runs: list[dict[str, Any]] = []
     for seed in range(1, seeds + 1):
         world = generate_initial_world_state([], seed)
         world.players = []
+        if scenario == "depleted_stores":
+            for settlement in world.settlements:
+                settlement["stores"] = {
+                    "food": 0,
+                    "water": 0,
+                    "building_materials": 0,
+                    "medical_supplies": 0,
+                }
+                settlement["needs"] = ["food", "water", "building_materials", "medical_supplies"]
+        elif scenario == "high_unrest":
+            for settlement in world.settlements:
+                settlement["unrest"] = 95
+                settlement["morale"] = 10
         tick = WorldTick(seed=seed)
         daily: list[dict[str, Any]] = []
         for _ in range(days):
@@ -885,7 +900,7 @@ def run_world_sim(*, days: int, seeds: int) -> dict[str, Any]:
         for status in snapshot["status_distribution"]
     })
     return {
-        "configuration": {"days": days, "seeds": seeds},
+        "configuration": {"days": days, "seeds": seeds, "scenario": scenario},
         "runs": runs,
         "summary": {
             "final_status_distribution": {
@@ -910,6 +925,25 @@ def run_world_sim(*, days: int, seeds: int) -> dict[str, Any]:
                 })
             },
         },
+    }
+
+
+def run_world_sim_scenarios(
+    *,
+    days: int,
+    seeds: int,
+) -> dict[str, Any]:
+    reports = {
+        scenario: run_world_sim(days=days, seeds=seeds, scenario=scenario)
+        for scenario in ("baseline", "depleted_stores", "high_unrest")
+    }
+    return {
+        "configuration": {"days": days, "seeds": seeds},
+        "scenarios": {
+            scenario: report["summary"]["final_status_distribution"]
+            for scenario, report in reports.items()
+        },
+        "reports": reports,
     }
 
 
@@ -1556,6 +1590,11 @@ def _build_parser() -> argparse.ArgumentParser:
     world_sim.add_argument("--days", type=int, default=100)
     world_sim.add_argument("--seeds", type=int, default=30)
     world_sim.add_argument(
+        "--scenario",
+        choices=("baseline", "depleted_stores", "high_unrest", "all"),
+        default="all",
+    )
+    world_sim.add_argument(
         "--out",
         type=Path,
         default=_default_out() / "world_sim",
@@ -1584,15 +1623,36 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "world_sim":
         if args.days <= 0 or args.seeds <= 0:
             parser.error("--days and --seeds must be positive")
-        report = run_world_sim(days=args.days, seeds=args.seeds)
-        _write_world_sim_report(args.out, report)
-        print("World simulation (final status distribution and population/stores):")
-        print(
-            f"days={args.days} seeds={args.seeds} "
-            f"statuses={report['summary']['final_status_distribution']} "
-            f"mean_population={report['summary']['mean_final_population']:.1f} "
-            f"mean_stores={report['summary']['mean_final_stores']}"
-        )
+        if args.scenario == "all":
+            report = run_world_sim_scenarios(days=args.days, seeds=args.seeds)
+            args.out.mkdir(parents=True, exist_ok=True)
+            with (args.out / "world_sim.json").open(
+                "w",
+                encoding="utf-8",
+                newline="\n",
+            ) as handle:
+                json.dump(report, handle, indent=2, sort_keys=True, allow_nan=False)
+                handle.write("\n")
+            print("World simulation status distribution by scenario:")
+            print(
+                f"days={args.days} seeds={args.seeds} "
+                f"scenarios={report['scenarios']}"
+            )
+        else:
+            report = run_world_sim(
+                days=args.days,
+                seeds=args.seeds,
+                scenario=args.scenario,
+            )
+            _write_world_sim_report(args.out, report)
+            print("World simulation (final status distribution and population/stores):")
+            print(
+                f"days={args.days} seeds={args.seeds} "
+                f"scenario={args.scenario} "
+                f"statuses={report['summary']['final_status_distribution']} "
+                f"mean_population={report['summary']['mean_final_population']:.1f} "
+                f"mean_stores={report['summary']['mean_final_stores']}"
+            )
         print(f"Wrote {args.out / 'world_sim.json'}")
         return 0
 

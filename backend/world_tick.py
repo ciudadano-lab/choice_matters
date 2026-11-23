@@ -25,6 +25,7 @@ from economy import (
 )
 from encounter_resolution import apply_encounter_outcome, resolve_encounter
 from settlement_tick import SettlementTick
+from world_content import load_world_content
 
 
 DEFAULT_STRATEGIC_PERIOD_DAYS = 21
@@ -100,7 +101,11 @@ class WorldTick:
         run_autopilot: bool = True,
         room_state: dict[str, Any] | None = None,
     ) -> WorldState:
-        state = copy.deepcopy(world_state.to_dict() if hasattr(world_state, "to_dict") else world_state)
+        state = (
+            world_state.to_dict()
+            if hasattr(world_state, "to_dict")
+            else copy.deepcopy(world_state)
+        )
         world = WorldState.from_dict(state)
 
         current_slot = self.slot_name_for_time(world.currentTime)
@@ -497,7 +502,15 @@ class WorldTick:
             event_queue.add(WorldEvent(day=world.currentDay + 2, summary="A supply cache is discovered.", event_type="supply"))
 
         world.activeEvents.append({"type": "tick", "day": world.currentDay, "summary": "World tick processed."})
+        self._trim_retained_collections(world)
         return world
+
+    def _trim_retained_collections(self, world: WorldState) -> None:
+        retention = load_world_content().faction_rules.retention
+        world.activeEvents = world.activeEvents[-retention.active_events:]
+        world.worldHistory = world.worldHistory[-retention.world_history:]
+        world.internalEvents = world.internalEvents[-retention.internal_events:]
+        world.relationships = world.relationships[-retention.relationships:]
 
     def _regenerate_location_resources(self, world: WorldState) -> None:
         if world.currentDay % 3 != 0:
@@ -742,7 +755,9 @@ class WorldTick:
                 })
 
     def _normalize_faction(self, faction: dict[str, Any]) -> None:
-        faction.setdefault("territory", [])
+        territory = faction.setdefault("territory", [])
+        if isinstance(territory, list):
+            faction["territory"] = sorted(set(str(item) for item in territory))
         faction.setdefault("population", 1)
         faction.setdefault("militaryStrength", 1)
         faction.setdefault("resources", {})
@@ -882,7 +897,27 @@ class WorldTick:
                 "goals": list(faction.get("goals", [])),
             }
             faction["population"] = max(1, population - new_faction["population"])
-            world.factions.append(new_faction)
+            existing_splinter = next(
+                (
+                    item for item in world.factions
+                    if isinstance(item, dict)
+                    and item.get("id") == new_faction["id"]
+                ),
+                None,
+            )
+            if existing_splinter is None:
+                world.factions.append(new_faction)
+            else:
+                existing_splinter["population"] = max(
+                    1,
+                    int(existing_splinter.get("population", 0))
+                    + new_faction["population"],
+                )
+                existing_splinter["territory"] = sorted(set(
+                    str(item)
+                    for item in existing_splinter.get("territory", [])
+                    + new_faction["territory"]
+                ))
             summary = f"A splinter broke off from {faction.get('name', 'Faction')}: {new_faction.get('name', 'New Faction')}."
         else:
             resources["food"] = max(0, food - 1)

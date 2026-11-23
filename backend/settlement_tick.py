@@ -46,12 +46,10 @@ class SettlementTick:
     ) -> WorldState:
         if days < 0:
             raise ValueError("days must be non-negative")
-        raw_state = (
-            world_state.to_dict()
-            if hasattr(world_state, "to_dict")
-            else copy.deepcopy(world_state)
-        )
-        world = WorldState.from_dict(raw_state)
+        if hasattr(world_state, "to_dict"):
+            world = world_state
+        else:
+            world = WorldState.from_dict(copy.deepcopy(world_state))
         if days == 0:
             return world
 
@@ -62,16 +60,20 @@ class SettlementTick:
                 (item for item in world.settlements if isinstance(item, dict)),
                 key=lambda item: str(item.get("id", "")),
             ):
+                before_needs = set(settlement.get("needs", []))
+                before_status = settlement.get("status")
                 reasons = self._tick_settlement(world, settlement, day)
-                if event_count >= self.rules.max_events_per_day:
-                    continue
-                world.internalEvents.append({
-                    "type": "settlement_tick",
-                    "day": day,
-                    "settlementId": settlement.get("id"),
-                    "reasons": reasons,
-                })
-                event_count += 1
+                needs_changed = before_needs != set(settlement.get("needs", []))
+                status_changed = before_status != settlement.get("status")
+                weekly = day % self.rules.weekly.interval_days == 0
+                if (status_changed or needs_changed or weekly) and event_count < self.rules.max_events_per_day:
+                    world.internalEvents.append({
+                        "type": "settlement_tick",
+                        "day": day,
+                        "settlementId": settlement.get("id"),
+                        "reasons": reasons,
+                    })
+                    event_count += 1
 
             if day % self.rules.weekly.interval_days == 0:
                 for faction_id, changes in self._recompute_faction_populations(world).items():
@@ -84,6 +86,8 @@ class SettlementTick:
                         "reasons": changes,
                     })
                     event_count += 1
+        retention = self.content.faction_rules.retention
+        world.internalEvents = world.internalEvents[-retention.internal_events:]
         return world
 
     def apply_foundation_grant(
@@ -102,8 +106,6 @@ class SettlementTick:
             (
                 item for item in settlements
                 if isinstance(item, dict)
-                and str(item.get("id")) == settlement_id
-                and item.get("id") == action_id
                 and item.get("location_id", item.get("location")) == location_id
             ),
             None,
