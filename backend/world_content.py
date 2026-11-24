@@ -169,6 +169,16 @@ class FactionDecisionRules(StrictContentModel):
     population_weight: StrictInt
     player_pressure_weight: StrictInt
     settlement_need_weight: StrictInt
+    weighted_draw_k: StrictInt = Field(gt=0, default=1)
+    repeat_penalty: StrictInt = Field(ge=0, default=12)
+    repeat_last_two_penalty: StrictInt = Field(ge=0, default=6)
+    capacity_per_settlement: StrictInt = Field(gt=0, default=100)
+    capacity_per_faction: StrictInt = Field(gt=0, default=300)
+    recruiting_capacity_weight: StrictInt = Field(ge=0, default=30)
+    hostile_disposition_weight: StrictInt = Field(ge=0, default=12)
+    friendly_disposition_weight: StrictInt = Field(ge=0, default=12)
+    goal_action_bonus: StrictInt = Field(ge=0, default=10)
+    goal_action_targets: dict[str, str] = Field(default_factory=dict)
 
 
 class FactionRules(StrictContentModel):

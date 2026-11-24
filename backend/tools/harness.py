@@ -841,6 +841,14 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
     for seed in range(1, seeds + 1):
         world = generate_initial_world_state([], seed)
         world.players = []
+        initial_dispositions = {
+            str(source.get("id", "")): {
+                str(target): int(score)
+                for target, score in source.get("relationships", {}).items()
+            }
+            for source in world.factions
+            if isinstance(source, dict)
+        }
         if scenario == "depleted_stores":
             for settlement in world.settlements:
                 settlement["stores"] = {
@@ -875,6 +883,7 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
                     }
         tick = WorldTick(seed=seed)
         daily: list[dict[str, Any]] = []
+        action_totals: dict[str, int] = {}
         for _ in range(days):
             world = tick.advance(
                 world,
@@ -882,6 +891,13 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
                 hours=24,
                 run_autopilot=False,
             )
+            if world.currentDay % 7 == 0:
+                for faction in world.factions:
+                    if not isinstance(faction, dict):
+                        continue
+                    action = faction.get("lastAction")
+                    if action is not None:
+                        action_totals[str(action)] = action_totals.get(str(action), 0) + 1
             settlements = sorted(
                 world.settlements,
                 key=lambda settlement: str(settlement.get("id", "")),
@@ -898,6 +914,30 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
             daily.append({
                 "day": world.currentDay,
                 "faction_count": len(world.factions),
+                "action_distribution": {
+                    action: sum(
+                        1
+                        for faction in world.factions
+                        if isinstance(faction, dict)
+                        and faction.get("lastAction") == action
+                    )
+                    for action in sorted({
+                        str(faction.get("lastAction"))
+                        for faction in world.factions
+                        if isinstance(faction, dict)
+                        and faction.get("lastAction") is not None
+                    })
+                },
+                "disposition_changed": any(
+                    {
+                        str(target): int(score)
+                        for target, score in source.get("relationships", {}).items()
+                    }
+                    != initial_dispositions.get(str(source.get("id", "")), {})
+                    for source in world.factions
+                    if isinstance(source, dict)
+                    and isinstance(source.get("relationships"), dict)
+                ),
                 "status_distribution": status_distribution,
                 "population": sum(
                     int(settlement.get("population", 0))
@@ -911,7 +951,12 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
                     for resource in resources
                 },
             })
-        runs.append({"seed": seed, "daily": daily})
+        runs.append({
+            "seed": seed,
+            "daily": daily,
+            "action_distribution": action_totals,
+            "faction_count_final": len(world.factions),
+        })
 
     final_days = [run["daily"][-1] for run in runs]
     all_statuses = sorted({
@@ -953,6 +998,25 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
         "configuration": {"days": days, "seeds": seeds, "scenario": scenario},
         "runs": runs,
         "summary": {
+            "action_distribution": {
+                action: sum(
+                    run["action_distribution"].get(action, 0)
+                    for run in runs
+                )
+                for action in sorted({
+                    action
+                    for run in runs
+                    for action in run["action_distribution"]
+                })
+            },
+            "faction_counts": faction_counts,
+            "disposition_change_seeds": sum(
+                any(
+                    snapshot["disposition_changed"]
+                    for snapshot in run["daily"]
+                )
+                for run in runs
+            ),
             "faction_counts": faction_counts,
             "final_status_distribution": {
                 status: sum(

@@ -277,6 +277,81 @@ def test_splinter_is_unique_capped_and_splits_population_and_territory():
     assert len(splinters_after_cooldown) == 1
 
 
+def test_weighted_faction_decisions_are_deterministic_and_use_scoring():
+    world_state = WorldState.from_dict({
+        "currentDay": 7,
+        "currentTime": "06:00",
+        "players": [],
+        "locations": [
+            {"id": "zone_a", "name": "A", "type": "site"},
+            {"id": "zone_b", "name": "B", "type": "site"},
+        ],
+        "settlements": [{
+            "id": "settlement_a",
+            "location_id": "zone_a",
+            "faction_id": "faction_test",
+            "population": 40,
+            "stores": {"food": 10, "water": 10},
+        }],
+        "factions": [{
+            "id": "faction_test",
+            "name": "Test",
+            "population": 40,
+            "militaryStrength": 4,
+            "resources": {"food": 10, "water": 10},
+            "territory": ["zone_a", "zone_b"],
+            "ideology": "survival",
+            "relationships": {
+                "faction_hostile": -80,
+                "faction_friendly": 80,
+            },
+            "goals": ["secure_supplies", "control_trade_routes"],
+            "lastAction": "recruit_survivors",
+            "recentActions": ["trade", "recruit_survivors"],
+        }],
+    })
+    faction = world_state.factions[0]
+    first_tick = WorldTick(seed=123)
+    second_tick = WorldTick(seed=123)
+
+    first_scores = first_tick._faction_action_scores(world_state, faction, 24)
+    repeat_score = first_scores["recruit_survivors"]
+    first_action = first_tick._choose_faction_action(world_state, faction, 24)
+    second_action = second_tick._choose_faction_action(world_state, faction, 24)
+
+    assert first_action == second_action
+    faction_without_repeat = dict(faction)
+    faction_without_repeat["lastAction"] = None
+    faction_without_repeat["recentActions"] = []
+    no_repeat_scores = first_tick._faction_action_scores(
+        world_state,
+        faction_without_repeat,
+        24,
+    )
+    assert no_repeat_scores["recruit_survivors"] > repeat_score
+
+    low_capacity_faction = dict(faction)
+    low_capacity_faction["population"] = 40
+    near_capacity_faction = dict(faction)
+    near_capacity_faction["population"] = 400
+    low_scores = first_tick._faction_action_scores(
+        world_state,
+        low_capacity_faction,
+        24,
+    )
+    high_scores = first_tick._faction_action_scores(
+        world_state,
+        near_capacity_faction,
+        24,
+    )
+    assert (
+        high_scores["recruit_survivors"]
+        < low_scores["recruit_survivors"]
+    )
+    assert first_scores["raid_settlements"] > 8
+    assert first_scores["trade"] > 20
+
+
 def test_world_tick_autopilot_biases_alliance_toward_diplomacy():
     world_state = WorldState.from_dict({
         "currentDay": 1,

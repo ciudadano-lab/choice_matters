@@ -749,6 +749,12 @@ class WorldTick:
             self._normalize_faction(faction)
             action = self._choose_faction_action(world, faction, hours)
             self._apply_faction_action(world, faction, action, hours, event_queue=event_queue)
+            recent_actions = faction.setdefault("recentActions", [])
+            if not isinstance(recent_actions, list):
+                recent_actions = []
+                faction["recentActions"] = recent_actions
+            recent_actions.append(action)
+            faction["recentActions"] = recent_actions[-3:]
             faction["lastAction"] = action
             world.activeEvents.append({
                 "type": "faction_action",
@@ -775,6 +781,37 @@ class WorldTick:
         faction.setdefault("relationships", {})
 
     def _choose_faction_action(self, world: WorldState, faction: dict[str, Any], hours: int) -> str:
+        scores = self._faction_action_scores(world, faction, hours)
+        rules = load_world_content().faction_rules.decisions
+        actions = sorted(scores)
+        weights = [
+            max(scores[action], 0) ** rules.weighted_draw_k
+            for action in actions
+        ]
+        total = sum(weights)
+        if total <= 0:
+            return actions[0]
+        seed = self._stable_seed(
+            f"faction_decision:{world.currentDay}:{faction.get('id', 'faction')}:{hours}",
+            self.seed,
+        )
+        roll = (seed % 2**32) / 2**32
+        threshold = roll * total
+        cumulative = 0.0
+        selected = actions[-1]
+        for action, weight in zip(actions, weights):
+            cumulative += weight
+            if threshold < cumulative:
+                selected = action
+                break
+        return selected
+
+    def _faction_action_scores(
+        self,
+        world: WorldState,
+        faction: dict[str, Any],
+        hours: int,
+    ) -> dict[str, int]:
         resources = faction.get("resources", {})
         food = resources.get("food", 0)
         water = resources.get("water", 0)
@@ -794,7 +831,6 @@ class WorldTick:
         scores["raid_settlements"] += resource_pressure * rules.resource_pressure_weight
         scores["attack"] += military * rules.military_weight
         scores["establish_checkpoints"] += military * rules.military_weight
-        scores["recruit_survivors"] += population * rules.population_weight
         scores["split_into_new_factions"] += population * rules.population_weight
         scores["negotiate"] += player_pressure * rules.player_pressure_weight
         scores["trade"] += player_pressure * rules.player_pressure_weight
@@ -813,25 +849,94 @@ class WorldTick:
         if resource_pressure == 0:
             scores["collapse"] = -100
 
-        seed = self._stable_seed(
-            f"{world.currentDay}:{faction_id}:{hours}",
-            self.seed,
-        )
-        ranked = sorted(
-            scores.items(),
-            key=lambda item: (
-            -item[1],
-            item[0],
+        settlement_count = max(
+            1,
+            sum(
+            1
+            for settlement in world.settlements
+            if isinstance(settlement, dict)
+            and settlement.get("faction_id") == faction_id
             ),
         )
-        top_score = ranked[0][1]
-        tied = sorted(
-            action for action, score in ranked
-            if score == top_score
+        capacity = (
+            rules.capacity_per_settlement * settlement_count
+            + rules.capacity_per_faction
         )
-        if len(tied) == 1:
-            return tied[0]
-        return tied[seed % len(tied)]
+        if population >= capacity:
+            scores["recruit_survivors"] -= rules.recruiting_capacity_weight
+        else:
+            utilization = population / capacity
+            scores["recruit_survivors"] -= int(
+                rules.recruiting_capacity_weight * utilization
+            )
+
+        disposition_values = faction.get("relationships", {})
+        if isinstance(disposition_values, dict):
+            for target_id in sorted(disposition_values):
+                disposition = disposition_values.get(target_id)
+                if not isinstance(disposition, int):
+                    continue
+                if disposition <= -30:
+                    hostility = min(100, -disposition)
+                    scores["raid_settlements"] += (
+                        hostility * rules.hostile_disposition_weight // 100
+                    )
+                    scores["attack"] += (
+                        hostility * rules.hostile_disposition_weight // 100
+                    )
+                elif disposition >= 30:
+                    friendliness = min(100, disposition)
+                    scores["trade"] += (
+                        friendliness * rules.friendly_disposition_weight // 100
+                    )
+                    scores["negotiate"] += (
+                        friendliness * rules.friendly_disposition_weight // 100
+                    )
+
+        goals = faction.get("goals", [])
+        if isinstance(goals, list):
+            for goal in goals:
+                target = rules.goal_action_targets.get(str(goal))
+                if target in scores:
+                    scores[target] += rules.goal_action_bonus
+
+        recent_actions = faction.get("recentActions", [])
+        if not isinstance(recent_actions, list):
+            recent_actions = []
+        last_action = faction.get("lastAction")
+        for action in scores:
+            if action == last_action:
+                scores[action] -= rules.repeat_penalty
+            if action in recent_actions[-2:] and action != last_action:
+                scores[action] -= rules.repeat_last_two_penalty
+
+        ruleset = load_world_content().faction_rules
+        if len(world.factions) >= ruleset.max_factions:
+            scores["split_into_new_factions"] = -100
+        if population < ruleset.splinter.minimum_parent_population:
+            scores["split_into_new_factions"] = -100
+        if len(faction.get("territory", [])) < (
+            ruleset.splinter.minimum_parent_remaining_territory
+            + ruleset.splinter.minimum_splinter_territory
+        ):
+            scores["split_into_new_factions"] = -100
+        splinter_count = sum(
+            1
+            for item in world.factions
+            if isinstance(item, dict)
+            and str(item.get("id", "")).startswith(f"{faction_id}:splinter:")
+        )
+        if splinter_count >= ruleset.splinter.max_splinters_per_parent:
+            scores["split_into_new_factions"] = -100
+        last_splinter_day = faction.get("last_splinter_day")
+        if (
+            isinstance(last_splinter_day, int)
+            and world.currentDay - last_splinter_day
+            < ruleset.splinter.cooldown_days
+        ):
+            scores["split_into_new_factions"] = -100
+
+        return scores
 
     def _apply_faction_action(self, world: WorldState, faction: dict[str, Any], action: str, hours: int, event_queue: WorldEventQueue | None = None) -> None:
         resources = faction.setdefault("resources", {})

@@ -15,6 +15,8 @@ def test_world_content_is_strict_and_references_are_valid():
     assert len(content.npcs.npcs) == 8
     assert content.faction_rules.faction_disposition_scale_factor == 5
     assert content.faction_rules.surface_faction_events_to_active_events is True
+    assert content.faction_rules.decisions.weighted_draw_k == 2
+    assert content.faction_rules.max_factions == 8
     with pytest.raises(ValidationError):
         FactionSeed.model_validate({
             "id": "faction_extra",

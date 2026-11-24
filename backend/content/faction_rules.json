@@ -16,11 +16,11 @@
   },
   "max_factions": 8,
   "splinter": {
-    "minimum_parent_population": 12,
+    "minimum_parent_population": 20,
     "minimum_parent_remaining_population": 8,
     "minimum_splinter_population": 4,
-    "cooldown_days": 14,
-    "max_splinters_per_parent": 2,
+    "cooldown_days": 30,
+    "max_splinters_per_parent": 1,
     "minimum_parent_remaining_territory": 1,
     "minimum_splinter_territory": 1
   },
@@ -34,13 +34,29 @@
       "establish_checkpoints": 15,
       "raid_settlements": 8,
       "negotiate": 18,
-      "collapse": 0,
-      "split_into_new_factions": 12
+      "collapse": 4,
+      "split_into_new_factions": 4
     },
     "resource_pressure_weight": 4,
     "military_weight": 2,
     "population_weight": 1,
     "player_pressure_weight": 3,
-    "settlement_need_weight": 5
+    "settlement_need_weight": 5,
+    "weighted_draw_k": 2,
+    "repeat_penalty": 14,
+    "repeat_last_two_penalty": 7,
+    "capacity_per_settlement": 100,
+    "capacity_per_faction": 300,
+    "recruiting_capacity_weight": 35,
+    "hostile_disposition_weight": 14,
+    "friendly_disposition_weight": 14,
+    "goal_action_bonus": 12,
+    "goal_action_targets": {
+      "stay_alive": "recruit_survivors",
+      "secure_shelter": "establish_checkpoints",
+      "secure_supplies": "raid_settlements",
+      "control_trade_routes": "trade",
+      "protect_civilians": "negotiate"
+    }
   }
 }
