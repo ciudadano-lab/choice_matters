@@ -405,7 +405,7 @@ class SimulationEngine:
             result = self._resolve_establish_settlement(state, action, rng)
             if action.actionType == "establish_settlement":
                 target_location_id = resolve_location_id(state, action.target) or action.target
-                granted_state = SettlementTick(seed=rng).apply_foundation_grant(
+                granted_state = SettlementTick(seed=self.seed).apply_foundation_grant(
                     state,
                     settlement_id=action.actionId,
                     location_id=target_location_id,

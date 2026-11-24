@@ -733,13 +733,22 @@ class WorldTick:
     def _simulate_factions(self, world: WorldState, hours: int, event_queue: WorldEventQueue | None = None) -> None:
         if not world.factions:
             return
+        if world.currentDay % load_world_content().faction_rules.decisions.interval_days != 0:
+            return
 
-        for index, faction in enumerate(world.factions):
+        factions = sorted(
+            (
+                faction for faction in world.factions
+                if isinstance(faction, dict)
+            ),
+            key=lambda faction: str(faction.get("id", "")),
+        )
+        for faction in factions:
             if not isinstance(faction, dict):
                 continue
             self._normalize_faction(faction)
-            action = self._choose_faction_action(world, faction, hours, index)
-            self._apply_faction_action(world, faction, action, hours, index, event_queue=event_queue)
+            action = self._choose_faction_action(world, faction, hours)
+            self._apply_faction_action(world, faction, action, hours, event_queue=event_queue)
             faction["lastAction"] = action
             world.activeEvents.append({
                 "type": "faction_action",
@@ -765,7 +774,7 @@ class WorldTick:
         faction.setdefault("goals", [])
         faction.setdefault("relationships", {})
 
-    def _choose_faction_action(self, world: WorldState, faction: dict[str, Any], hours: int, index: int) -> str:
+    def _choose_faction_action(self, world: WorldState, faction: dict[str, Any], hours: int) -> str:
         resources = faction.get("resources", {})
         food = resources.get("food", 0)
         water = resources.get("water", 0)
@@ -778,29 +787,53 @@ class WorldTick:
             for item in world.worldHistory[-8:]
             if isinstance(item, dict) and any(word in str(item.get("summary", "")).lower() for word in ("trade", "negotiate", "attack", "recruit", "travel", "build"))
         )
-        seed = self._stable_seed(f"{world.currentDay}:{faction.get('id', 'faction')}:{hours}:{index}", self.seed + index)
+        faction_id = str(faction.get("id", "faction"))
+        rules = load_world_content().faction_rules.decisions
+        scores = dict(rules.base_scores)
+        scores["collapse"] += resource_pressure * rules.resource_pressure_weight
+        scores["raid_settlements"] += resource_pressure * rules.resource_pressure_weight
+        scores["attack"] += military * rules.military_weight
+        scores["establish_checkpoints"] += military * rules.military_weight
+        scores["recruit_survivors"] += population * rules.population_weight
+        scores["split_into_new_factions"] += population * rules.population_weight
+        scores["negotiate"] += player_pressure * rules.player_pressure_weight
+        scores["trade"] += player_pressure * rules.player_pressure_weight
+        needed_settlements = sum(
+            1
+            for settlement in world.settlements
+            if isinstance(settlement, dict)
+            and settlement.get("faction_id") == faction_id
+            and settlement.get("needs")
+        )
+        scores["raid_settlements"] += needed_settlements * rules.settlement_need_weight
+        scores["trade"] += needed_settlements * rules.settlement_need_weight
+        if ideology == "resource_acquisition":
+            scores["raid_settlements"] += 12
+            scores["trade"] += 8
+        if resource_pressure == 0:
+            scores["collapse"] = -100
 
-        if resource_pressure >= 2 and (seed % 5) == 0:
-            return "collapse"
-        if food <= 1 and (seed % 4) == 0:
-            return "raid_settlements"
-        if population > 4 and (seed % 7) == 0:
-            return "split_into_new_factions"
-        if military >= 3 and (seed % 6) == 0 and self._has_other_faction(world, faction):
-            return "attack"
-        if ideology == "resource_acquisition" and (seed % 5) == 0:
-            return "raid_settlements"
-        if player_pressure > 0 and (seed % 3) == 0:
-            return "negotiate" if (seed % 2) == 0 else "trade"
-        if military >= 2 and (seed % 4) == 0:
-            return "establish_checkpoints"
-        if population > 2 and (seed % 5) == 1:
-            return "recruit_survivors"
-        if (seed % 3) == 0:
-            return "expand_territory"
-        return "trade" if self._has_other_faction(world, faction) else "negotiate"
+        seed = self._stable_seed(
+            f"{world.currentDay}:{faction_id}:{hours}",
+            self.seed,
+        )
+        ranked = sorted(
+            scores.items(),
+            key=lambda item: (
+            -item[1],
+            item[0],
+            ),
+        )
+        top_score = ranked[0][1]
+        tied = sorted(
+            action for action, score in ranked
+            if score == top_score
+        )
+        if len(tied) == 1:
+            return tied[0]
+        return tied[seed % len(tied)]
 
-    def _apply_faction_action(self, world: WorldState, faction: dict[str, Any], action: str, hours: int, index: int, event_queue: WorldEventQueue | None = None) -> None:
+    def _apply_faction_action(self, world: WorldState, faction: dict[str, Any], action: str, hours: int, event_queue: WorldEventQueue | None = None) -> None:
         resources = faction.setdefault("resources", {})
         food = resources.get("food", 0)
         water = resources.get("water", 0)
@@ -808,7 +841,10 @@ class WorldTick:
         population = faction.get("population", 1)
         territory = faction.setdefault("territory", [])
         ideology = faction.get("ideology", "survival")
-        seed = self._stable_seed(f"{world.currentDay}:{faction.get('id', 'faction')}:{hours}:{index}:{action}", self.seed + index + 11)
+        seed = self._stable_seed(
+            f"{world.currentDay}:{faction.get('id', 'faction')}:{hours}:{action}",
+            self.seed,
+        )
 
         target = self._select_target_faction(world, faction)
         if target is not None and action not in {"attack", "trade", "negotiate", "raid_settlements"}:
@@ -885,40 +921,90 @@ class WorldTick:
             resources["water"] = max(0, water // 2)
             summary = f"{faction.get('name', 'Faction')} collapsed under supply pressure and internal division."
         elif action == "split_into_new_factions":
-            new_faction = {
-                "id": f"{faction.get('id', 'faction')}_splinter",
-                "name": f"{faction.get('name', 'Faction')} Splinter",
-                "population": max(1, population // 2),
-                "militaryStrength": max(1, military // 2),
-                "resources": {key: max(0, value // 2) for key, value in resources.items()},
-                "territory": list(territory[:1]),
-                "ideology": ideology,
-                "relationships": {},
-                "goals": list(faction.get("goals", [])),
-            }
-            faction["population"] = max(1, population - new_faction["population"])
-            existing_splinter = next(
-                (
-                    item for item in world.factions
-                    if isinstance(item, dict)
-                    and item.get("id") == new_faction["id"]
-                ),
-                None,
+            rules = load_world_content().faction_rules
+            splinter_rules = rules.splinter
+            parent_id = str(faction.get("id", "faction"))
+            splinter_ids = sorted(
+                str(item.get("id"))
+                for item in world.factions
+                if isinstance(item, dict)
+                and str(item.get("id", "")).startswith(f"{parent_id}:splinter:")
             )
-            if existing_splinter is None:
-                world.factions.append(new_faction)
-            else:
-                existing_splinter["population"] = max(
-                    1,
-                    int(existing_splinter.get("population", 0))
-                    + new_faction["population"],
+            parent_last_splinter_day = faction.get("last_splinter_day")
+            can_splinter = (
+                len(world.factions) < rules.max_factions
+                and population >= splinter_rules.minimum_parent_population
+                and len(splinter_ids) < splinter_rules.max_splinters_per_parent
+                and (
+                    not isinstance(parent_last_splinter_day, int)
+                    or world.currentDay - parent_last_splinter_day
+                    >= splinter_rules.cooldown_days
                 )
-                existing_splinter["territory"] = sorted(set(
-                    str(item)
-                    for item in existing_splinter.get("territory", [])
-                    + new_faction["territory"]
-                ))
-            summary = f"A splinter broke off from {faction.get('name', 'Faction')}: {new_faction.get('name', 'New Faction')}."
+                and len(territory) >= (
+                    splinter_rules.minimum_parent_remaining_territory
+                    + splinter_rules.minimum_splinter_territory
+                )
+            )
+            if can_splinter:
+                splinter_number = len(splinter_ids) + 1
+                splinter_id = f"{parent_id}:splinter:{world.currentDay}:{splinter_number}"
+                territory_count = len(territory)
+                splinter_territory_count = min(
+                    max(
+                        splinter_rules.minimum_splinter_territory,
+                        territory_count // 2,
+                    ),
+                    territory_count
+                    - splinter_rules.minimum_parent_remaining_territory,
+                )
+                splinter_territory = sorted(
+                    territory,
+                    key=lambda item: str(item),
+                )[:splinter_territory_count]
+                parent_territory = sorted(
+                    set(str(item) for item in territory)
+                    - set(splinter_territory)
+                )
+                splinter_population = min(
+                    max(
+                        splinter_rules.minimum_splinter_population,
+                        population // 2,
+                    ),
+                    population
+                    - splinter_rules.minimum_parent_remaining_population,
+                )
+                remaining_population = population - splinter_population
+                faction["territory"] = parent_territory
+                faction["population"] = remaining_population
+                faction["last_splinter_day"] = world.currentDay
+                new_faction = {
+                    "id": splinter_id,
+                    "name": f"{faction.get('name', 'Faction')} Splinter {splinter_number}",
+                    "population": splinter_population,
+                    "population_last_derived": splinter_population,
+                    "roaming_population": 0,
+                    "militaryStrength": max(1, military // 2),
+                    "resources": {
+                        key: max(0, value // 2)
+                        for key, value in resources.items()
+                    },
+                    "territory": splinter_territory,
+                    "ideology": ideology,
+                    "relationships": {},
+                    "goals": list(faction.get("goals", [])),
+                    "parentFactionId": parent_id,
+                    "foundedDay": world.currentDay,
+                }
+                world.factions.append(new_faction)
+                summary = (
+                    f"{faction.get('name', 'Faction')} formed "
+                    f"{new_faction['name']}."
+                )
+            else:
+                summary = (
+                    f"{faction.get('name', 'Faction')} did not splinter "
+                    "because its faction limits or division rules blocked it."
+                )
         else:
             resources["food"] = max(0, food - 1)
             summary = f"{faction.get('name', 'Faction')} adjusted operations to survive the week."

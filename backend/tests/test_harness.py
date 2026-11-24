@@ -167,6 +167,7 @@ def test_world_sim_scenarios_report_depleted_and_high_unrest_paths():
     assert set(report["scenarios"]) == {
         "baseline",
         "depleted_stores",
+        "mild_shortage",
         "high_unrest",
     }
     assert all(

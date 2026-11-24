@@ -151,11 +151,34 @@ class RetentionPolicy(StrictContentModel):
     relationships: StrictInt = Field(gt=0)
 
 
+class SplinterRules(StrictContentModel):
+    minimum_parent_population: StrictInt = Field(gt=0)
+    minimum_parent_remaining_population: StrictInt = Field(gt=0)
+    minimum_splinter_population: StrictInt = Field(gt=0)
+    cooldown_days: StrictInt = Field(ge=0)
+    max_splinters_per_parent: StrictInt = Field(gt=0)
+    minimum_parent_remaining_territory: StrictInt = Field(ge=0)
+    minimum_splinter_territory: StrictInt = Field(gt=0)
+
+
+class FactionDecisionRules(StrictContentModel):
+    interval_days: StrictInt = Field(gt=0)
+    base_scores: dict[str, StrictInt]
+    resource_pressure_weight: StrictInt
+    military_weight: StrictInt
+    population_weight: StrictInt
+    player_pressure_weight: StrictInt
+    settlement_need_weight: StrictInt
+
+
 class FactionRules(StrictContentModel):
     goal_vocabulary: tuple[str, ...]
     faction_disposition_scale_factor: StrictInt = Field(gt=0)
     surface_faction_events_to_active_events: bool = True
     retention: RetentionPolicy
+    max_factions: StrictInt = Field(gt=0)
+    splinter: SplinterRules
+    decisions: FactionDecisionRules
 
 
 class WorldContent(StrictContentModel):

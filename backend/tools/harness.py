@@ -834,7 +834,7 @@ def run_play(
 def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[str, Any]:
     if days <= 0 or seeds <= 0:
         raise ValueError("days and seeds must be positive")
-    if scenario not in {"baseline", "depleted_stores", "high_unrest"}:
+    if scenario not in {"baseline", "depleted_stores", "mild_shortage", "high_unrest"}:
         raise ValueError(f"Unknown world_sim scenario: {scenario}")
 
     runs: list[dict[str, Any]] = []
@@ -854,6 +854,25 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
             for settlement in world.settlements:
                 settlement["unrest"] = 95
                 settlement["morale"] = 10
+        elif scenario == "mild_shortage":
+            for index, settlement in enumerate(sorted(
+                world.settlements,
+                key=lambda item: str(item.get("id", "")),
+            )):
+                if index % 2 == 0:
+                    settlement["stores"] = {
+                        "food": 4,
+                        "water": 4,
+                        "building_materials": 1,
+                        "medical_supplies": 1,
+                    }
+                else:
+                    settlement["stores"] = {
+                        "food": 18,
+                        "water": 18,
+                        "building_materials": 8,
+                        "medical_supplies": 4,
+                    }
         tick = WorldTick(seed=seed)
         daily: list[dict[str, Any]] = []
         for _ in range(days):
@@ -878,6 +897,7 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
             })
             daily.append({
                 "day": world.currentDay,
+                "faction_count": len(world.factions),
                 "status_distribution": status_distribution,
                 "population": sum(
                     int(settlement.get("population", 0))
@@ -899,10 +919,41 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
         for snapshot in final_days
         for status in snapshot["status_distribution"]
     })
+    faction_counts = {
+        day: {
+            "mean": _mean(
+                next(
+                    snapshot["faction_count"]
+                    for snapshot in run["daily"]
+                    if snapshot["day"] == day
+                )
+                for run in runs
+            ),
+            "min": min(
+                next(
+                    snapshot["faction_count"]
+                    for snapshot in run["daily"]
+                    if snapshot["day"] == day
+                )
+                for run in runs
+            ),
+            "max": max(
+                next(
+                    snapshot["faction_count"]
+                    for snapshot in run["daily"]
+                    if snapshot["day"] == day
+                )
+                for run in runs
+            ),
+        }
+        for day in (30, 60, 100)
+        if days >= day
+    }
     return {
         "configuration": {"days": days, "seeds": seeds, "scenario": scenario},
         "runs": runs,
         "summary": {
+            "faction_counts": faction_counts,
             "final_status_distribution": {
                 status: sum(
                     snapshot["status_distribution"].get(status, 0)
@@ -935,7 +986,7 @@ def run_world_sim_scenarios(
 ) -> dict[str, Any]:
     reports = {
         scenario: run_world_sim(days=days, seeds=seeds, scenario=scenario)
-        for scenario in ("baseline", "depleted_stores", "high_unrest")
+        for scenario in ("baseline", "depleted_stores", "mild_shortage", "high_unrest")
     }
     return {
         "configuration": {"days": days, "seeds": seeds},
@@ -1591,7 +1642,7 @@ def _build_parser() -> argparse.ArgumentParser:
     world_sim.add_argument("--seeds", type=int, default=30)
     world_sim.add_argument(
         "--scenario",
-        choices=("baseline", "depleted_stores", "high_unrest", "all"),
+        choices=("baseline", "depleted_stores", "mild_shortage", "high_unrest", "all"),
         default="all",
     )
     world_sim.add_argument(

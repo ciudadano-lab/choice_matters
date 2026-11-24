@@ -13,5 +13,34 @@
     "world_history": 25,
     "internal_events": 50,
     "relationships": 50
+  },
+  "max_factions": 8,
+  "splinter": {
+    "minimum_parent_population": 12,
+    "minimum_parent_remaining_population": 8,
+    "minimum_splinter_population": 4,
+    "cooldown_days": 14,
+    "max_splinters_per_parent": 2,
+    "minimum_parent_remaining_territory": 1,
+    "minimum_splinter_territory": 1
+  },
+  "decisions": {
+    "interval_days": 7,
+    "base_scores": {
+      "expand_territory": 20,
+      "recruit_survivors": 15,
+      "attack": 10,
+      "trade": 20,
+      "establish_checkpoints": 15,
+      "raid_settlements": 8,
+      "negotiate": 18,
+      "collapse": 0,
+      "split_into_new_factions": 12
+    },
+    "resource_pressure_weight": 4,
+    "military_weight": 2,
+    "population_weight": 1,
+    "player_pressure_weight": 3,
+    "settlement_need_weight": 5
   }
 }

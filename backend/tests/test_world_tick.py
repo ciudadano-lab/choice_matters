@@ -178,6 +178,105 @@ def test_world_tick_deduplicates_and_sorts_faction_territory():
     assert world_state.factions[0]["territory"] == ["alpha", "zone"]
 
 
+def test_splinter_is_unique_capped_and_splits_population_and_territory():
+    world_state = WorldState.from_dict({
+        "currentDay": 28,
+        "currentTime": "06:00",
+        "players": [],
+        "locations": [
+            {"id": "zone_a", "name": "A", "type": "site"},
+            {"id": "zone_b", "name": "B", "type": "site"},
+            {"id": "zone_c", "name": "C", "type": "site"},
+        ],
+        "settlements": [],
+        "factions": [
+            {
+                "id": "faction_parent",
+                "name": "Parent",
+                "population": 20,
+                "militaryStrength": 4,
+                "resources": {"food": 20, "water": 20},
+                "territory": ["zone_a", "zone_b", "zone_c"],
+                "ideology": "survival",
+                "relationships": {},
+                "goals": [],
+            },
+            *[
+                {"id": f"other_{index}", "population": 2,
+                 "militaryStrength": 1, "resources": {}, "territory": [],
+                 "ideology": "survival", "relationships": {}, "goals": []}
+                for index in range(7)
+            ],
+        ],
+    })
+    tick = WorldTick(seed=13)
+    faction = world_state.factions[0]
+    tick._apply_faction_action(
+        world_state,
+        faction,
+        "split_into_new_factions",
+        24,
+        event_queue=WorldEventQueue(),
+    )
+
+    assert len(world_state.factions) == 8
+    assert faction["territory"] == ["zone_a", "zone_b", "zone_c"]
+    assert faction["population"] == 20
+    splinters = [
+        item for item in world_state.factions
+        if str(item.get("id", "")).startswith("faction_parent:splinter:")
+    ]
+    assert len(splinters) == 0
+
+    uncapped = WorldState.from_dict({
+        "currentDay": 28,
+        "players": [],
+        "locations": [],
+        "settlements": [],
+        "factions": [{
+            "id": "faction_parent",
+            "name": "Parent",
+            "population": 20,
+            "militaryStrength": 4,
+            "resources": {"food": 20, "water": 20},
+            "territory": ["zone_a", "zone_b", "zone_c"],
+            "ideology": "survival",
+            "relationships": {},
+            "goals": [],
+        }],
+    })
+    parent = uncapped.factions[0]
+    tick._apply_faction_action(
+        uncapped,
+        parent,
+        "split_into_new_factions",
+        24,
+        event_queue=WorldEventQueue(),
+    )
+    new_splinter = next(
+        item for item in uncapped.factions
+        if str(item.get("id", "")).startswith("faction_parent:splinter:")
+    )
+    assert new_splinter["id"] == "faction_parent:splinter:28:1"
+    assert parent["population"] == 10
+    assert parent["territory"] == ["zone_b", "zone_c"]
+    assert new_splinter["population"] == 10
+    assert new_splinter["territory"] == ["zone_a"]
+
+    tick._apply_faction_action(
+        uncapped,
+        parent,
+        "split_into_new_factions",
+        24,
+        event_queue=WorldEventQueue(),
+    )
+    splinters_after_cooldown = [
+        item for item in uncapped.factions
+        if str(item.get("id", "")).startswith("faction_parent:splinter:")
+    ]
+    assert len(splinters_after_cooldown) == 1
+
+
 def test_world_tick_autopilot_biases_alliance_toward_diplomacy():
     world_state = WorldState.from_dict({
         "currentDay": 1,
@@ -793,7 +892,7 @@ def test_world_tick_advances_world_state_and_schedules_events():
     assert queue.next_event()["day"] >= updated.currentDay
 
 
-def test_world_tick_simulates_faction_actions_and_relationships():
+def test_world_tick_defers_faction_decisions_to_weekly_ticks():
     world_state = WorldState.from_dict(
         {
             "currentDay": 1,
@@ -885,19 +984,8 @@ def test_world_tick_simulates_faction_actions_and_relationships():
     updated = tick.advance(world_state, queue, hours=24)
 
     faction = next(faction for faction in updated.factions if faction["id"] == "faction_survivors")
-    assert "lastAction" in faction
-    assert faction["lastAction"] in {
-        "expand_territory",
-        "recruit_survivors",
-        "attack",
-        "trade",
-        "establish_checkpoints",
-        "raid_settlements",
-        "negotiate",
-        "collapse",
-        "split_into_new_factions",
-    }
-    assert faction["relationships"]
+    assert "lastAction" not in faction
+    assert faction["relationships"] == {}
     for score in faction["relationships"].values():
         assert -100 <= score <= 100
 
@@ -927,7 +1015,7 @@ def test_world_tick_generates_faction_summary_events_for_world_context():
 
     queue = WorldEventQueue()
     tick = WorldTick(seed=45)
-    tick._apply_faction_action(world_state, world_state.factions[0], "expand_territory", 24, 0, event_queue=queue)
+    tick._apply_faction_action(world_state, world_state.factions[0], "expand_territory", 24, event_queue=queue)
 
     summaries = [item.summary for item in queue._events]
     assert any("Survivors expanded into" in summary or "expanded into" in summary.lower() for summary in summaries)
