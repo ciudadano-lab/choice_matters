@@ -103,6 +103,28 @@ def test_legacy_room_loads_and_normalizes_settlements_without_converting_npcs():
     assert normalized["stores"]["food"] == 0
     assert normalized["status"] == "stable"
     assert "food" in normalized["needs"]
+    assert world.to_dict()["agreements"] == []
+
+
+def test_optional_phase_extensions_load_and_round_trip():
+    raw = {
+        "locations": [{"id": "loc_1", "deposits": {"water": 4}}],
+        "factions": [{"id": "faction_1", "pools": {"influence": 3}}],
+        "settlements": [{
+            "id": "settlement_1",
+            "location_id": "loc_1",
+            "population": 3,
+            "facilities": ["clinic"],
+        }],
+        "agreements": [{"id": "agreement_1", "status": "proposed"}],
+    }
+
+    world = WorldState.from_dict(raw).to_dict()
+
+    assert world["locations"][0]["deposits"] == {"water": 4}
+    assert world["factions"][0]["pools"] == {"influence": 3}
+    assert world["settlements"][0]["facilities"] == ["clinic"]
+    assert world["agreements"] == raw["agreements"]
 
 
 def test_settlement_normalizer_keeps_legacy_aliases_and_derives_tier():

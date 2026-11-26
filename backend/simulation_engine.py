@@ -7,9 +7,9 @@ import re
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from action_registry import get_live_actions
+from action_registry import EFFECT_HANDLER_NAMES, get_live_actions
 from economy import apply_action_yield, cap_resource_stores, get_health_recovery_config
 from probability_config import (
     DEFAULT_PLAN_QUALITY,
@@ -20,6 +20,7 @@ from probability_config import (
 from location_lookup import resolve_location_id
 from plan_features import PlanFeatures
 from probability_engine import ChainResult, run_chain
+from world_content import load_world_content
 
 BACKEND_DIR = Path(__file__).resolve().parent
 if str(BACKEND_DIR) not in sys.path:
@@ -29,7 +30,7 @@ from world_state import materialize_poi, settlement_tier
 from settlement_tick import SettlementTick
 
 _ACTION_REGISTRY = get_live_actions()
-_REGISTRY_ONLY_ACTIONS = frozenset({"fortify", "craft_repair"})
+_REGISTRY_ONLY_ACTIONS = frozenset({"fortify", "craft_repair", "signal"})
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,7 @@ class SimulationEngine:
         "establish_settlement",
         "fortify",
         "craft_repair",
+        "signal",
         "forage",
         "failed_attempt",
         "ambient_noise",
@@ -227,7 +229,7 @@ class SimulationEngine:
             timeCost=0,
             resourceCost={},
         )
-        result = self.apply(world_state, action)
+        result = self.apply(world_state, action, rules="current")
         apply_action_yield(world_state, result, action)
         self.apply_rest_recovery(result, actor_id)
         result.resolvedAction = action
@@ -309,7 +311,15 @@ class SimulationEngine:
                 return faction_id
         return None
 
-    def apply(self, world_state: dict | Any, action: StructuredAction) -> SimulationResult:
+    def apply(
+        self,
+        world_state: dict | Any,
+        action: StructuredAction,
+        *,
+        rules: Literal["legacy", "current"] = "legacy",
+    ) -> SimulationResult:
+        if rules not in {"legacy", "current"}:
+            raise ValueError(f"Unsupported action rules: {rules}")
         raw_state = copy.deepcopy(world_state.to_dict() if hasattr(world_state, "to_dict") else world_state)
         if "world_state" not in raw_state:
             raw_state = {"world_state": raw_state}
@@ -422,6 +432,7 @@ class SimulationEngine:
                 result,
                 definition,
                 additive=action.actionType in _REGISTRY_ONLY_ACTIONS,
+                rules=rules,
             )
 
         physically_impossible = bool(result.get("physicallyImpossible", False))
@@ -915,7 +926,7 @@ class SimulationEngine:
         self._apply_resource_cost(state, action.resourceCost)
         return {
             "timeConsumed": action.timeCost,
-            "resourceChanges": {"medical_supplies": -1},
+            "resourceChanges": {},
             "playerStatusChanges": [{"playerId": action.actor, "stress": -1}],
             "locationChanges": [],
             "encounterProbability": 0.0,
@@ -1097,55 +1108,206 @@ class SimulationEngine:
         definition: Any,
         *,
         additive: bool,
+        rules: Literal["legacy", "current"],
     ) -> None:
         result["timeConsumed"] = action.timeCost
-        resource_changes = result.setdefault("resourceChanges", {})
-        player_changes = result.setdefault("playerStatusChanges", [])
-        location_changes = result.setdefault("locationChanges", [])
-
         for effect in definition.effects:
-            if effect.type == "change_resource":
-                if effect.resource is None or effect.amount is None:
-                    raise ValueError(
-                        f"{definition.id}: change_resource requires resource and amount"
-                    )
-                prior = resource_changes.get(effect.resource, 0) if additive else 0
-                resource_changes[effect.resource] = prior + effect.amount
-            elif effect.type == "change_stat":
-                if effect.stat is None or effect.amount is None:
-                    raise ValueError(
-                        f"{definition.id}: change_stat requires stat and amount"
-                    )
-                self._set_player_change(
-                    player_changes,
-                    self._effect_player_id(action, effect.target),
-                    effect.stat,
-                    effect.amount,
-                    additive=additive,
-                )
-            elif effect.type == "move":
-                location_ref = effect.location or action.target
-                location_id = resolve_location_id(state, location_ref)
-                if location_id is None:
-                    continue
-                self._set_player_change(
-                    player_changes,
-                    self._effect_player_id(action, effect.target),
-                    "location",
-                    location_id,
-                    additive=False,
-                )
-                location_changes[:] = [
-                    change for change in location_changes
-                    if change.get("locationId") != location_id
-                ]
-                location_changes.append({"locationId": location_id, "state": "visited"})
-            elif effect.type in {"add_status", "remove_status"}:
-                self._apply_status_effect(state, action, effect)
-            elif effect.type in {"add_item", "remove_item"}:
-                self._apply_inventory_effect(state, action, effect)
-            elif effect.type == "set_flag":
-                self._apply_flag_effect(state, action, effect)
+            if effect.rules not in {"all", rules}:
+                continue
+            handler_name = EFFECT_HANDLER_NAMES[effect.type]
+            handler = getattr(self, handler_name)
+            handler(state, action, result, effect, additive)
+
+    def _effect_change_resource(
+        self, state: dict[str, Any], action: StructuredAction, result: dict[str, Any],
+        effect: Any, additive: bool,
+    ) -> None:
+        if effect.resource is None or effect.amount is None:
+            raise ValueError(f"{action.actionType}: change_resource requires resource and amount")
+        resource_changes = result.setdefault("resourceChanges", {})
+        prior = resource_changes.get(effect.resource, 0) if additive else 0
+        resource_changes[effect.resource] = prior + effect.amount
+
+    def _effect_change_stat(
+        self, state: dict[str, Any], action: StructuredAction, result: dict[str, Any],
+        effect: Any, additive: bool,
+    ) -> None:
+        if effect.stat is None or effect.amount is None:
+            raise ValueError(f"{action.actionType}: change_stat requires stat and amount")
+        self._set_player_change(
+            result.setdefault("playerStatusChanges", []),
+            self._effect_player_id(action, effect.target),
+            effect.stat,
+            effect.amount,
+            additive=additive,
+        )
+
+    def _effect_move(
+        self, state: dict[str, Any], action: StructuredAction, result: dict[str, Any],
+        effect: Any, additive: bool,
+    ) -> None:
+        location_ref = effect.location or action.target
+        location_id = resolve_location_id(state, location_ref)
+        if location_id is None:
+            return
+        player_changes = result.setdefault("playerStatusChanges", [])
+        self._set_player_change(
+            player_changes,
+            self._effect_player_id(action, effect.target),
+            "location",
+            location_id,
+            additive=False,
+        )
+        location_changes = result.setdefault("locationChanges", [])
+        location_changes[:] = [
+            change for change in location_changes
+            if change.get("locationId") != location_id
+        ]
+        location_changes.append({"locationId": location_id, "state": "visited"})
+
+    def _effect_status(
+        self, state: dict[str, Any], action: StructuredAction, result: dict[str, Any],
+        effect: Any, additive: bool,
+    ) -> None:
+        self._apply_status_effect(state, action, effect)
+
+    def _effect_inventory(
+        self, state: dict[str, Any], action: StructuredAction, result: dict[str, Any],
+        effect: Any, additive: bool,
+    ) -> None:
+        self._apply_inventory_effect(state, action, effect)
+
+    def _effect_set_flag(
+        self, state: dict[str, Any], action: StructuredAction, result: dict[str, Any],
+        effect: Any, additive: bool,
+    ) -> None:
+        self._apply_flag_effect(state, action, effect)
+
+    def _effect_change_faction_disposition(
+        self, state: dict[str, Any], action: StructuredAction, result: dict[str, Any],
+        effect: Any, additive: bool,
+    ) -> None:
+        if effect.amount is None:
+            raise ValueError(f"{action.actionType}: change_faction_disposition requires amount")
+        faction_id = effect.faction_id
+        target_entity = action.parameters.get("targetEntity")
+        if faction_id is None and isinstance(target_entity, dict):
+            faction_id = target_entity.get("factionId")
+        faction = next(
+            (item for item in state.get("factions", []) if item.get("id") == faction_id),
+            None,
+        )
+        if faction is None:
+            return
+        player_id = self._effect_player_id(action, effect.player_id or effect.target)
+        dispositions = faction.setdefault("player_dispositions", {})
+        if not isinstance(dispositions, dict):
+            dispositions = {}
+            faction["player_dispositions"] = dispositions
+        delta = self._bounded_registry_delta(effect.amount)
+        prior = dispositions.get(player_id, 0)
+        dispositions[player_id] = max(-100, min(100, prior + delta))
+
+    def _effect_change_settlement_stat(
+        self, state: dict[str, Any], action: StructuredAction, result: dict[str, Any],
+        effect: Any, additive: bool,
+    ) -> None:
+        if effect.stat is None or effect.amount is None:
+            raise ValueError(f"{action.actionType}: change_settlement_stat requires stat and amount")
+        settlement = self._settlement_for_effect(state, action, effect.settlement_id)
+        if settlement is None:
+            return
+        delta = self._bounded_registry_delta(effect.amount)
+        if effect.stat == "attention":
+            player_id = self._effect_player_id(action, effect.player_id or effect.target)
+            attention = settlement.setdefault("attention_by_player", {})
+            if not isinstance(attention, dict):
+                attention = {}
+                settlement["attention_by_player"] = attention
+            attention[player_id] = max(
+                0,
+                min(100, int(attention.get(player_id, 0)) + delta),
+            )
+            return
+        if effect.stat.startswith("stores."):
+            resource = effect.stat.removeprefix("stores.")
+            stores = settlement.setdefault("stores", {})
+            cap = load_world_content().settlements.defaults.daily.store_caps.get(resource)
+            updated = max(0, int(stores.get(resource, 0)) + delta)
+            stores[resource] = min(cap, updated) if cap is not None else updated
+            return
+        if effect.stat not in {"population", "morale", "unrest", "defense"}:
+            raise ValueError(f"{action.actionType}: unsupported settlement stat {effect.stat!r}")
+        lower = 0
+        upper = 100 if effect.stat in {"morale", "unrest", "defense"} else None
+        value = int(settlement.get(effect.stat, 0)) + delta
+        if effect.stat == "population":
+            value = min(
+                load_world_content().settlements.defaults.weekly.population_cap,
+                value,
+            )
+        settlement[effect.stat] = max(lower, min(upper, value) if upper is not None else value)
+        if effect.stat == "population":
+            settlement["tier"] = settlement_tier(settlement["population"])
+
+    def _effect_change_npc_loyalty(
+        self, state: dict[str, Any], action: StructuredAction, result: dict[str, Any],
+        effect: Any, additive: bool,
+    ) -> None:
+        if effect.amount is None:
+            raise ValueError(f"{action.actionType}: change_npc_loyalty requires amount")
+        npc_id = effect.npc_id
+        if npc_id == "settlement_leader":
+            settlement = self._settlement_for_effect(state, action, effect.settlement_id)
+            npc_id = settlement.get("leader_npc_id") if settlement else None
+        elif npc_id == "faction_leader":
+            faction = next(
+                (
+                    item for item in state.get("factions", [])
+                    if item.get("id") == effect.faction_id
+                ),
+                None,
+            )
+            npc_id = faction.get("leader_npc_id") if faction else None
+        if npc_id is None:
+            target_entity = action.parameters.get("targetEntity")
+            npc_id = target_entity.get("npcId") if isinstance(target_entity, dict) else None
+        npcs = state.get("npcs", {})
+        npc = npcs.get(npc_id) if isinstance(npcs, dict) and npc_id is not None else None
+        if npc is None:
+            return
+        npc["loyalty"] = max(
+            0,
+            min(100, int(npc.get("loyalty", 0)) + self._bounded_registry_delta(effect.amount)),
+        )
+
+    @staticmethod
+    def _bounded_registry_delta(amount: int | float) -> int:
+        configured_cap = load_world_content().settlements.defaults.daily.max_stat_change
+        return max(-configured_cap, min(configured_cap, int(amount)))
+
+    @staticmethod
+    def _settlement_for_effect(
+        state: dict[str, Any], action: StructuredAction, settlement_id: str | None,
+    ) -> dict[str, Any] | None:
+        if settlement_id == "created":
+            settlement_id = action.actionId
+        target_location_id = resolve_location_id(state, action.target) or action.target
+        if settlement_id not in {None, "target"}:
+            return next(
+                (
+                    item for item in state.get("settlements", [])
+                    if item.get("id") == settlement_id
+                ),
+                None,
+            )
+        return next(
+            (
+                item for item in state.get("settlements", [])
+                if item.get("location_id", item.get("location")) == target_location_id
+            ),
+            None,
+        )
 
     @staticmethod
     def _effect_player_id(action: StructuredAction, target: str | None) -> str:

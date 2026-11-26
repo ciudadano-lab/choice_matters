@@ -123,9 +123,9 @@ def test_auto_resolve_policy_targets_spawn_location_id_for_named_player_location
     original_apply = engine.apply
     observed_targets = []
 
-    def observe_apply(world_state, action):
+    def observe_apply(world_state, action, **kwargs):
         observed_targets.append(action.target)
-        return original_apply(world_state, action)
+        return original_apply(world_state, action, **kwargs)
 
     monkeypatch.setattr(engine, "apply", observe_apply)
     result = engine.auto_resolve_policy_day(

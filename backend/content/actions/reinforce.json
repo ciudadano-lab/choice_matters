@@ -7,8 +7,9 @@
   "time_cost": 1,
   "required_inputs": [],
   "effects": [
-    {"type": "change_resource", "resource": "medical_supplies", "amount": -1},
-    {"type": "change_stat", "stat": "stress", "amount": -1}
+    {"type": "change_resource", "resource": "medical_supplies", "amount": -1, "rules": "legacy"},
+    {"type": "change_stat", "stat": "stress", "amount": -1},
+    {"type": "set_flag", "target": "location", "flag": "fortified", "value": 1, "duration_days": 5, "rules": "current"}
   ],
   "status": "live",
   "source": "legacy",

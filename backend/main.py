@@ -57,6 +57,16 @@ def append_debug_log(message: str) -> None:
         handle.write(f"[{timestamp}] {message}\n")
 
 
+def _apply_live_action(
+    engine: SimulationEngine,
+    world_state: Any,
+    action: StructuredAction,
+) -> Any:
+    result = engine.apply(world_state, action, rules="current")
+    WorldTick(seed=engine.seed).apply_faction_relationship_changes(result, action)
+    return result
+
+
 def _log_player_command_parse(
     room_code: str,
     slot: int,
@@ -1147,8 +1157,8 @@ async def _process_decision(room_code: str, websocket: WebSocket, msg: dict):
         narration_room_state["players"][str(slot)]["storySummary"] = summary_text
         narration_room_state["worldEra"] = summary_text
 
-    preview_result = SimulationEngine(seed=_seed_from_code(room_code)).apply(snapshot_world, action)
     preview_engine = SimulationEngine(seed=_seed_from_code(room_code))
+    preview_result = _apply_live_action(preview_engine, snapshot_world, action)
     preview_engine.apply_rest_recovery(preview_result, action.actor)
     apply_action_yield(snapshot_world, preview_result, action)
     preview_tick = WorldTick(seed=_seed_from_code(room_code))
@@ -1244,7 +1254,7 @@ async def _process_decision(room_code: str, websocket: WebSocket, msg: dict):
         world_state = WorldState.from_room_state(state)
         previous_day = world_state.currentDay
         engine = SimulationEngine(seed=_seed_from_code(room_code))
-        result = engine.apply(world_state, action)
+        result = _apply_live_action(engine, world_state, action)
         engine.apply_rest_recovery(result, action.actor)
         apply_action_yield(world_state, result, action)
         if result.encounterOccurred:

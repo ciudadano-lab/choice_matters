@@ -257,6 +257,8 @@ class WorldTick:
                         action,
                         seed=action.parameters.get("seed", self.seed),
                     )
+                if action is not None:
+                    self.apply_faction_relationship_changes(result, action)
                 if result.actionType == "establish_settlement" and action is not None:
                     target_location_id = resolve_location_id(
                         result.updatedWorldState,
@@ -312,7 +314,7 @@ class WorldTick:
                             },
                             timeCost=0,
                         )
-                        result = engine.apply(world, ambient_action)
+                        result = engine.apply(world, ambient_action, rules="current")
                         if result.encounterOccurred:
                             result = self.resolve_encounter_after_action(
                                 world,
@@ -320,6 +322,7 @@ class WorldTick:
                                 ambient_action,
                                 seed=self.seed,
                             )
+                        self.apply_faction_relationship_changes(result, ambient_action)
                         world = WorldState.from_dict(result.updatedWorldState)
                         ambient_record = self._record_slot_result(
                             world,
@@ -343,6 +346,41 @@ class WorldTick:
             )
 
         return world
+
+    @staticmethod
+    def apply_faction_relationship_changes(result: Any, action: StructuredAction) -> None:
+        updated_state = result.updatedWorldState
+        state = (
+            updated_state.get("world_state", updated_state)
+            if isinstance(updated_state, dict)
+            else {}
+        )
+        factions = state.get("factions", []) if isinstance(state, dict) else []
+        scale = load_world_content().faction_rules.faction_disposition_scale_factor
+        for change in result.factionRelationshipChanges:
+            faction_id = change.get("factionId")
+            faction = next(
+                (
+                    item for item in factions
+                    if isinstance(item, dict) and item.get("id") == faction_id
+                ),
+                None,
+            )
+            if faction is None:
+                continue
+            dispositions = faction.setdefault("player_dispositions", {})
+            if not isinstance(dispositions, dict):
+                dispositions = {}
+                faction["player_dispositions"] = dispositions
+            player_id = action.actor
+            current = dispositions.get(player_id, 0)
+            try:
+                updated = int(current) + int(change.get("delta", 0)) * scale
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"Invalid faction relationship change for {faction_id!r}: {change!r}"
+                )
+            dispositions[player_id] = max(-100, min(100, updated))
 
     def advance(
         self,

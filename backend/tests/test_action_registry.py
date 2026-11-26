@@ -81,5 +81,10 @@ def test_registry_includes_new_legacy_and_phase_four_actions():
 
     assert set(LEGACY_CHAIN_MAP).issubset(actions)
     assert {"fortify", "craft_repair", "signal"}.issubset(actions)
-    assert actions["signal"].status == "draft"
+    assert actions["signal"].status == "live"
     assert all(actions[action].chain_template == template for action, template in LEGACY_CHAIN_MAP.items())
+    assert {
+        "change_faction_disposition",
+        "change_settlement_stat",
+        "change_npc_loyalty",
+    }.issubset({effect.type for action in actions.values() for effect in action.effects})

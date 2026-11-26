@@ -1309,6 +1309,7 @@ class WorldState:
     rumors: list[dict[str, Any]] = field(default_factory=list)
     worldHistory: list[dict[str, Any]] = field(default_factory=list)
     relationships: list[dict[str, Any]] = field(default_factory=list)
+    agreements: list[dict[str, Any]] = field(default_factory=list)
     seed: int = 7
     emergentTemplates: list[dict[str, Any]] = field(default_factory=list)
     poiTemplates: list[dict[str, Any]] = field(default_factory=list)
@@ -1405,6 +1406,7 @@ class WorldState:
             rumors=_coerce_list(raw.get("rumors"), []),
             worldHistory=_coerce_list(raw.get("worldHistory"), []),
             relationships=_coerce_list(raw.get("relationships"), []),
+            agreements=_coerce_list(raw.get("agreements"), []),
             seed=_coerce_int(raw.get("seed"), 7),
             emergentTemplates=_coerce_list(raw.get("emergentTemplates"), []),
             poiTemplates=_coerce_list(raw.get("poiTemplates"), []),
@@ -1452,6 +1454,7 @@ class WorldState:
             "rumors": copy.deepcopy(self.rumors),
             "worldHistory": copy.deepcopy(self.worldHistory),
             "relationships": copy.deepcopy(self.relationships),
+            "agreements": copy.deepcopy(self.agreements),
             "seed": self.seed,
             "emergentTemplates": copy.deepcopy(self.emergentTemplates),
             "poiTemplates": copy.deepcopy(self.poiTemplates),

@@ -17,16 +17,20 @@ from pydantic import (
 BACKEND_DIR = Path(__file__).resolve().parent
 CONTENT_DIR = BACKEND_DIR / "content"
 ACTIONS_DIR = CONTENT_DIR / "actions"
-VALID_EFFECT_TYPES = frozenset({
-    "change_resource",
-    "change_stat",
-    "move",
-    "add_status",
-    "remove_status",
-    "add_item",
-    "remove_item",
-    "set_flag",
-})
+EFFECT_HANDLER_NAMES = {
+    "change_resource": "_effect_change_resource",
+    "change_stat": "_effect_change_stat",
+    "move": "_effect_move",
+    "add_status": "_effect_status",
+    "remove_status": "_effect_status",
+    "add_item": "_effect_inventory",
+    "remove_item": "_effect_inventory",
+    "set_flag": "_effect_set_flag",
+    "change_faction_disposition": "_effect_change_faction_disposition",
+    "change_settlement_stat": "_effect_change_settlement_stat",
+    "change_npc_loyalty": "_effect_change_npc_loyalty",
+}
+VALID_EFFECT_TYPES = frozenset(EFFECT_HANDLER_NAMES)
 
 
 class StrictModel(BaseModel):
@@ -34,7 +38,8 @@ class StrictModel(BaseModel):
 
 
 class EffectRecord(StrictModel):
-    type: Literal["change_resource", "change_stat", "move", "add_status", "remove_status", "add_item", "remove_item", "set_flag"]
+    type: str
+    rules: Literal["all", "legacy", "current"] = "all"
     target: str | None = None
     resource: str | None = None
     stat: str | None = None
@@ -44,6 +49,10 @@ class EffectRecord(StrictModel):
     item: str | None = None
     flag: str | None = None
     location: str | None = None
+    faction_id: str | None = None
+    player_id: str | None = None
+    settlement_id: str | None = None
+    npc_id: str | None = None
     duration_days: StrictInt | None = None
 
     @field_validator("type")

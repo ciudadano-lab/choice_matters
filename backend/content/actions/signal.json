@@ -7,9 +7,10 @@
   "time_cost": 1,
   "required_inputs": ["location"],
   "effects": [
-    {"type": "set_flag", "target": "location", "flag": "signal_sent", "value": 1}
+    {"type": "set_flag", "target": "location", "flag": "signal_sent", "value": 1},
+    {"type": "change_settlement_stat", "settlement_id": "target", "stat": "attention", "amount": 2, "rules": "current"}
   ],
-  "status": "draft",
+  "status": "live",
   "source": "registry",
-  "notes": "Deferred until the faction layer can consume signal events."
+  "notes": "Signal at the target settlement to draw its attention."
 }

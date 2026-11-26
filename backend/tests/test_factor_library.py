@@ -177,6 +177,7 @@ def test_shipped_content_has_twenty_factor_records_nineteen_sources_and_five_tem
         "travel", "search", "scavenge", "gather", "build", "reinforce",
         "rest", "communicate", "negotiate", "trade", "recruit", "send_mission",
         "establish_settlement", "defend", "attack", "fortify", "craft_repair",
+        "signal",
     }
 
 

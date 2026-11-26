@@ -1,4 +1,7 @@
 import copy
+import json
+from dataclasses import asdict
+from pathlib import Path
 
 import pytest
 
@@ -172,20 +175,226 @@ def test_registry_only_actions_apply_effects_and_registry_time_cost(
     assert result.resourceChanges == expected_resources
 
 
-def test_draft_signal_is_not_executable():
+def test_current_rules_reinforce_uses_defense_without_medical_supplies():
+    world = {
+        "currentDay": 1,
+        "currentTime": "08:00",
+        "players": [{"id": "player_1", "location": "outpost", "stress": 20}],
+        "locations": [{"id": "outpost", "name": "Outpost"}],
+        "resources": {"medical_supplies": 3},
+    }
+    action = StructuredAction(
+        actionId="reinforce-current",
+        actionType="reinforce",
+        actor="player_1",
+        target="outpost",
+    )
+
+    legacy = SimulationEngine(seed=1).apply(world, action)
+    current = SimulationEngine(seed=1).apply(world, action, rules="current")
+
+    assert legacy.resourceChanges == {"medical_supplies": -1}
+    assert legacy.updatedWorldState["resources"]["medical_supplies"] == 2
+    assert current.resourceChanges == {}
+    assert current.updatedWorldState["resources"]["medical_supplies"] == 3
+    assert current.updatedWorldState["locations"][0]["flags"]["fortified"] == 1
+    assert current.updatedWorldState["locations"][0]["flagExpiries"]["fortified"] == 6
+
+    legacy_build = SimulationEngine(seed=1).apply(world, StructuredAction(
+        actionId="build-legacy",
+        actionType="build",
+        actor="player_1",
+        target="outpost",
+    ))
+    current_build = SimulationEngine(seed=1).apply(
+        world,
+        StructuredAction(
+            actionId="build-current",
+            actionType="build",
+            actor="player_1",
+            target="outpost",
+        ),
+        rules="current",
+    )
+    assert "fortified" not in legacy_build.updatedWorldState["locations"][0].get("flags", {})
+    assert current_build.updatedWorldState["locations"][0]["flags"]["fortified"] == 1
+
+
+def test_current_rules_signal_is_live_and_increases_settlement_attention():
     from action_registry import load_action_registry
 
-    assert load_action_registry()["signal"].status == "draft"
-    with pytest.raises(ValueError, match="Unsupported action type: signal"):
-        SimulationEngine(seed=1).apply(
-            {"players": [{"id": "player_1"}], "locations": [], "resources": {}},
+    assert load_action_registry()["signal"].status == "live"
+    world = {
+        "currentDay": 1,
+        "currentTime": "08:00",
+        "players": [{"id": "player_1", "location": "outpost"}],
+        "locations": [{"id": "outpost", "name": "Outpost"}],
+        "settlements": [{
+            "id": "outpost-settlement",
+            "location_id": "outpost",
+            "population": 10,
+            "stores": {},
+        }],
+        "resources": {},
+    }
+
+    result = SimulationEngine(seed=1).apply(
+        world,
+        StructuredAction(
+            actionId="live-signal",
+            actionType="signal",
+            actor="player_1",
+            target="outpost",
+        ),
+        rules="current",
+    )
+
+    assert result.updatedWorldState["locations"][0]["flags"]["signal_sent"] == 1
+    assert result.updatedWorldState["settlements"][0]["attention_by_player"] == {
+        "player_1": 2
+    }
+
+
+def test_default_apply_matches_legacy_golden_for_all_fifteen_actions(monkeypatch):
+    tests_dir = Path(__file__).resolve().parent
+    with (tests_dir / "golden" / "probability_rolllog.json").open(
+        "r", encoding="utf-8"
+    ) as handle:
+        golden = json.load(handle)
+    from golden_cases import CHAIN_ACTIONS, build_apply_cases
+    import probability_engine
+    from make_golden import FROZEN_LIBRARY, _apply_record
+
+    monkeypatch.setattr(probability_engine, "_DEFAULT_LIBRARY", FROZEN_LIBRARY)
+    cases = build_apply_cases()
+    assert [case["action_fields"]["actionType"] for case in cases[:15]] == CHAIN_ACTIONS
+    assert [
+        _apply_record(index, case) for index, case in enumerate(cases[:15])
+    ] == golden["apply_cases"][:15]
+
+
+def test_main_preview_and_real_apply_use_identical_current_rules():
+    from main import _apply_live_action
+
+    world = {
+        "currentDay": 2,
+        "currentTime": "08:00",
+        "players": [{"id": "player_1", "location": "town"}],
+        "locations": [{"id": "town", "name": "Town"}],
+        "factions": [{
+            "id": "faction_survivors",
+            "player_dispositions": {"player_1": 0},
+            "leader_npc_id": "npc_leader",
+        }],
+        "settlements": [{
+            "id": "town-settlement",
+            "location_id": "town",
+            "morale": 50,
+            "stores": {"food": 3},
+        }],
+        "resources": {},
+    }
+    action = StructuredAction(
+        actionId="trade-parity",
+        actionType="trade",
+        actor="player_1",
+        target="town",
+    )
+
+    preview = _apply_live_action(SimulationEngine(seed=9), world, action)
+    real = _apply_live_action(SimulationEngine(seed=9), world, action)
+
+    assert asdict(preview) == asdict(real)
+    assert real.updatedWorldState["settlements"][0]["stores"]["food"] == 4
+    assert real.updatedWorldState["factions"][0]["player_dispositions"]["player_1"] == 5
+
+
+def test_world_tick_scales_apply_relationship_changes_after_apply():
+    world = {
+        "currentDay": 1,
+        "currentTime": "08:00",
+        "players": [{"id": "player_1", "location": "town"}],
+        "locations": [{"id": "town", "name": "Town"}],
+        "factions": [{
+            "id": "faction_survivors",
+            "player_dispositions": {"player_1": 0},
+        }],
+        "resources": {},
+        "relationships": [],
+    }
+    action = StructuredAction(
+        actionId="negotiate-scale",
+        actionType="negotiate",
+        actor="player_1",
+        target="town",
+    )
+    result = SimulationEngine(seed=1).apply(world, action, rules="current")
+    relationship_log = copy.deepcopy(result.updatedWorldState["relationships"])
+
+    WorldTick.apply_faction_relationship_changes(result, action)
+
+    assert result.factionRelationshipChanges == [{"factionId": "faction_survivors", "delta": 2}]
+    assert result.updatedWorldState["factions"][0]["player_dispositions"]["player_1"] == 10
+    assert result.updatedWorldState["relationships"] == relationship_log
+
+
+def test_current_social_and_settlement_actions_change_registry_state():
+    initial = {
+        "currentDay": 1,
+        "currentTime": "08:00",
+        "players": [{"id": "player_1", "location": "town"}],
+        "locations": [
+            {"id": "town", "name": "Town"},
+            {"id": "camp", "name": "Camp"},
+        ],
+        "factions": [{
+            "id": "faction_survivors",
+            "player_dispositions": {"player_1": 0},
+            "leader_npc_id": "npc_leader",
+        }],
+        "settlements": [{
+            "id": "town_settlement",
+            "location_id": "town",
+            "population": 20,
+            "morale": 50,
+            "stores": {"food": 4},
+            "leader_npc_id": "npc_leader",
+        }],
+        "npcs": {"npc_leader": {"id": "npc_leader", "loyalty": 50}},
+        "resources": {"food": 10, "water": 10},
+    }
+
+    def resolve(action_type, target="town", action_id=None):
+        return SimulationEngine(seed=1).apply(
+            copy.deepcopy(initial),
             StructuredAction(
-                actionId="draft-signal",
-                actionType="signal",
+                actionId=action_id or f"current-{action_type}",
+                actionType=action_type,
                 actor="player_1",
-                target="nowhere",
+                target=target,
             ),
-        )
+            rules="current",
+        ).updatedWorldState
+
+    negotiated = resolve("negotiate")
+    assert negotiated["settlements"][0]["morale"] == 51
+    assert negotiated["npcs"]["npc_leader"]["loyalty"] == 51
+
+    traded = resolve("trade")
+    assert traded["settlements"][0]["stores"]["food"] == 5
+
+    recruited = resolve("recruit")
+    assert recruited["settlements"][0]["population"] == 21
+    assert recruited["npcs"]["npc_leader"]["loyalty"] == 51
+
+    mission = resolve("send_mission")
+    assert mission["factions"][0]["player_dispositions"]["player_1"] == 1
+    assert mission["settlements"][0]["attention_by_player"]["player_1"] == 1
+
+    founded = resolve("establish_settlement", target="camp", action_id="new-camp")
+    created = next(item for item in founded["settlements"] if item["id"] == "new-camp")
+    assert created["morale"] == 51
+    assert founded["npcs"]["npc_leader"]["loyalty"] == 51
 
 
 def test_registry_effect_vocabulary_uses_clamped_player_updates(monkeypatch):
@@ -207,6 +416,23 @@ def test_registry_effect_vocabulary_uses_clamped_player_updates(monkeypatch):
             {"type": "remove_item", "target": "actor", "item": "old_tool"},
             {"type": "add_item", "target": "actor", "item": "new_tool"},
             {"type": "set_flag", "target": "location", "flag": "signaled", "value": 1},
+            {
+                "type": "change_faction_disposition",
+                "faction_id": "faction_test",
+                "player_id": "actor",
+                "amount": 3,
+            },
+            {
+                "type": "change_settlement_stat",
+                "settlement_id": "target",
+                "stat": "morale",
+                "amount": 4,
+            },
+            {
+                "type": "change_npc_loyalty",
+                "npc_id": "npc_test",
+                "amount": 5,
+            },
         ],
         "status": "live",
     })
@@ -225,6 +451,17 @@ def test_registry_effect_vocabulary_uses_clamped_player_updates(monkeypatch):
             {"id": "origin", "name": "Origin"},
             {"id": "target", "name": "Target"},
         ],
+        "factions": [{
+            "id": "faction_test",
+            "player_dispositions": {"player_1": 0},
+        }],
+        "settlements": [{
+            "id": "settlement_test",
+            "location_id": "target",
+            "morale": 40,
+            "stores": {},
+        }],
+        "npcs": {"npc_test": {"id": "npc_test", "loyalty": 50}},
         "resources": {"food": 0},
     }
 
@@ -246,6 +483,9 @@ def test_registry_effect_vocabulary_uses_clamped_player_updates(monkeypatch):
     assert player["inventory"] == ["new_tool"]
     assert [effect["name"] for effect in player["statusEffects"]] == ["new_status"]
     assert result.updatedWorldState["locations"][1]["flags"]["signaled"] == 1
+    assert result.updatedWorldState["factions"][0]["player_dispositions"]["player_1"] == 2
+    assert result.updatedWorldState["settlements"][0]["morale"] == 42
+    assert result.updatedWorldState["npcs"]["npc_test"]["loyalty"] == 52
 
 
 def test_policy_action_commits_without_advancing_calendar():

@@ -183,7 +183,7 @@ class FactionDecisionRules(StrictContentModel):
 
 class FactionRules(StrictContentModel):
     goal_vocabulary: tuple[str, ...]
-    faction_disposition_scale_factor: StrictInt = Field(gt=0)
+    faction_disposition_scale_factor: StrictInt = Field(gt=0, default=5)
     surface_faction_events_to_active_events: bool = True
     retention: RetentionPolicy
     max_factions: StrictInt = Field(gt=0)

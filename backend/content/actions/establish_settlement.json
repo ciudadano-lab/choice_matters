@@ -9,7 +9,9 @@
   "effects": [
     {"type": "change_resource", "resource": "food", "amount": -2},
     {"type": "change_resource", "resource": "water", "amount": -1},
-    {"type": "change_stat", "stat": "stress", "amount": -1}
+    {"type": "change_stat", "stat": "stress", "amount": -1},
+    {"type": "change_settlement_stat", "settlement_id": "created", "stat": "morale", "amount": 1, "rules": "current"},
+    {"type": "change_npc_loyalty", "settlement_id": "created", "faction_id": "faction_survivors", "npc_id": "faction_leader", "amount": 1, "rules": "current"}
   ],
   "status": "live",
   "source": "legacy",

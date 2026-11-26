@@ -8,7 +8,8 @@
   "required_inputs": [],
   "effects": [
     {"type": "change_resource", "resource": "water", "amount": -1},
-    {"type": "change_resource", "resource": "food", "amount": 1}
+    {"type": "change_resource", "resource": "food", "amount": 1},
+    {"type": "change_settlement_stat", "settlement_id": "target", "stat": "stores.food", "amount": 1, "rules": "current"}
   ],
   "status": "live",
   "source": "legacy",

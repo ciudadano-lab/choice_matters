@@ -6,7 +6,11 @@
   "chain_template": "noticed_chain",
   "time_cost": 1,
   "required_inputs": [],
-  "effects": [{"type": "change_resource", "resource": "food", "amount": -1}],
+  "effects": [
+    {"type": "change_resource", "resource": "food", "amount": -1},
+    {"type": "change_settlement_stat", "settlement_id": "target", "stat": "population", "amount": 1, "rules": "current"},
+    {"type": "change_npc_loyalty", "settlement_id": "target", "npc_id": "settlement_leader", "amount": 1, "rules": "current"}
+  ],
   "status": "live",
   "source": "legacy",
   "notes": "Invite another survivor to join."
