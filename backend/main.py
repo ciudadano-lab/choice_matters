@@ -225,6 +225,11 @@ def build_client_state(state: dict, recipient_slot: int | None) -> dict:
         }
 
     world = client_state.get("world_state", {})
+    player_id = f"player_{recipient_slot}" if recipient_slot is not None else "player_1"
+    known_world = InformationLayer().get_player_known_world(
+        world,
+        player_id=player_id,
+    )
     world_players = []
     for player in world.get("players", []):
         if recipient_slot is not None and player.get("id") == f"player_{recipient_slot}":
@@ -240,11 +245,9 @@ def build_client_state(state: dict, recipient_slot: int | None) -> dict:
     world["players"] = world_players
     world.pop("actualWorld", None)
     world.pop("rumoredWorld", None)
-    world["playerKnownWorld"] = {
-        "seed": world.get("seed"),
-        "locations": copy.deepcopy(world.get("playerKnownWorld", {}).get("locations", [])),
-        "rumors": copy.deepcopy(world.get("playerKnownWorld", {}).get("rumors", [])),
-    }
+    world["factions"] = copy.deepcopy(known_world["factions"])
+    world["settlements"] = copy.deepcopy(known_world["settlements"])
+    world["playerKnownWorld"] = known_world
     client_state["world_state"] = world
     return client_state
 

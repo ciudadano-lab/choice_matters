@@ -1189,10 +1189,7 @@ class SimulationEngine:
     ) -> None:
         if effect.amount is None:
             raise ValueError(f"{action.actionType}: change_faction_disposition requires amount")
-        faction_id = effect.faction_id
-        target_entity = action.parameters.get("targetEntity")
-        if faction_id is None and isinstance(target_entity, dict):
-            faction_id = target_entity.get("factionId")
+        faction_id = self._target_faction_id(state, action) or effect.faction_id
         faction = next(
             (item for item in state.get("factions", []) if item.get("id") == faction_id),
             None,
@@ -1206,7 +1203,8 @@ class SimulationEngine:
             faction["player_dispositions"] = dispositions
         delta = self._bounded_registry_delta(effect.amount)
         prior = dispositions.get(player_id, 0)
-        dispositions[player_id] = max(-100, min(100, prior + delta))
+        limit = load_world_content().faction_rules.max_player_disposition
+        dispositions[player_id] = max(-limit, min(limit, int(prior) + delta))
 
     def _effect_change_settlement_stat(
         self, state: dict[str, Any], action: StructuredAction, result: dict[str, Any],
@@ -1224,10 +1222,8 @@ class SimulationEngine:
             if not isinstance(attention, dict):
                 attention = {}
                 settlement["attention_by_player"] = attention
-            attention[player_id] = max(
-                0,
-                min(100, int(attention.get(player_id, 0)) + delta),
-            )
+            cap = load_world_content().faction_rules.max_player_attention
+            attention[player_id] = max(0, min(cap, int(attention.get(player_id, 0)) + delta))
             return
         if effect.stat.startswith("stores."):
             resource = effect.stat.removeprefix("stores.")
@@ -1283,8 +1279,67 @@ class SimulationEngine:
 
     @staticmethod
     def _bounded_registry_delta(amount: int | float) -> int:
-        configured_cap = load_world_content().settlements.defaults.daily.max_stat_change
+        configured_cap = load_world_content().faction_rules.max_effect_change
         return max(-configured_cap, min(configured_cap, int(amount)))
+
+    @staticmethod
+    def _target_faction_id(state: dict[str, Any], action: StructuredAction) -> str | None:
+        target_entity = action.parameters.get("targetEntity")
+        if isinstance(target_entity, dict):
+            faction_id = target_entity.get("factionId", target_entity.get("faction_id"))
+            if isinstance(faction_id, str):
+                return faction_id
+
+        target = str(action.target)
+        factions = state.get("factions", [])
+        if any(isinstance(item, dict) and item.get("id") == target for item in factions):
+            return target
+
+        players = state.get("players", [])
+        target_player = (
+            players.get(target)
+            if isinstance(players, dict)
+            else next(
+                (item for item in players if isinstance(item, dict) and item.get("id") == target),
+                None,
+            )
+        )
+        if isinstance(target_player, dict):
+            faction_id = target_player.get("factionId", target_player.get("faction_id"))
+            if isinstance(faction_id, str):
+                return faction_id
+
+        location_id = resolve_location_id(state, target)
+        settlements = state.get("settlements", [])
+        settlement = next(
+            (
+                item for item in settlements
+                if isinstance(item, dict)
+                and (
+                    item.get("id") == target
+                    or item.get("location_id", item.get("location")) == location_id
+                )
+            ),
+            None,
+        )
+        if isinstance(settlement, dict) and isinstance(settlement.get("faction_id"), str):
+            return settlement["faction_id"]
+
+        raw_locations = state.get("locations", [])
+        if isinstance(raw_locations, dict):
+            location = raw_locations.get(location_id) if location_id else None
+        elif isinstance(raw_locations, list):
+            location = next(
+                (
+                    item for item in raw_locations
+                    if isinstance(item, dict) and item.get("id") == location_id
+                ),
+                None,
+            )
+        else:
+            location = None
+        controlling_faction = location.get("controllingFaction") if location else None
+        return controlling_faction if isinstance(controlling_faction, str) else None
 
     @staticmethod
     def _settlement_for_effect(

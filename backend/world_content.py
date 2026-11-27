@@ -177,6 +177,12 @@ class FactionDecisionRules(StrictContentModel):
     recruiting_capacity_weight: StrictInt = Field(ge=0, default=30)
     hostile_disposition_weight: StrictInt = Field(ge=0, default=12)
     friendly_disposition_weight: StrictInt = Field(ge=0, default=12)
+    player_hostile_threshold: StrictInt = Field(ge=1, le=100, default=30)
+    player_friendly_threshold: StrictInt = Field(ge=1, le=100, default=30)
+    player_hostile_action_weight: StrictInt = Field(ge=0, default=24)
+    player_friendly_action_weight: StrictInt = Field(ge=0, default=20)
+    attention_pressure_weight: StrictInt = Field(ge=0, default=20)
+    minimum_player_decision_bonus: StrictInt = Field(ge=0, default=1)
     goal_action_bonus: StrictInt = Field(ge=0, default=10)
     goal_action_targets: dict[str, str] = Field(default_factory=dict)
 
@@ -184,6 +190,10 @@ class FactionDecisionRules(StrictContentModel):
 class FactionRules(StrictContentModel):
     goal_vocabulary: tuple[str, ...]
     faction_disposition_scale_factor: StrictInt = Field(gt=0, default=5)
+    max_effect_change: StrictInt = Field(gt=0, default=5)
+    max_player_attention: StrictInt = Field(gt=0, default=100)
+    attention_decay_per_day: StrictInt = Field(ge=0, default=1)
+    max_player_disposition: StrictInt = Field(gt=0, default=100)
     surface_faction_events_to_active_events: bool = True
     retention: RetentionPolicy
     max_factions: StrictInt = Field(gt=0)

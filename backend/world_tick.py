@@ -380,7 +380,8 @@ class WorldTick:
                 raise ValueError(
                     f"Invalid faction relationship change for {faction_id!r}: {change!r}"
                 )
-            dispositions[player_id] = max(-100, min(100, updated))
+            limit = load_world_content().faction_rules.max_player_disposition
+            dispositions[player_id] = max(-limit, min(limit, updated))
 
     def advance(
         self,
@@ -707,6 +708,7 @@ class WorldTick:
                         "reliability": 0.8,
                         "confidence": 0.8,
                         "timestamp": world.currentDay,
+                        "player_id": actor_id,
                         "content": info.get("content", ""),
                     },
                     target_location=target_location,
@@ -794,10 +796,19 @@ class WorldTick:
             recent_actions.append(action)
             faction["recentActions"] = recent_actions[-3:]
             faction["lastAction"] = action
+            faction["lastDecisionDay"] = world.currentDay
+            faction["lastDecisionTarget"] = self._select_player_decision_target(
+                world,
+                faction,
+                action,
+            )
             world.activeEvents.append({
                 "type": "faction_action",
                 "day": world.currentDay,
                 "summary": f"{faction.get('name', faction.get('id', 'Faction'))} chose to {action}.",
+                "decisionFactors": copy.deepcopy(faction.get("lastDecisionFactors", {})),
+                "decisionInfluences": copy.deepcopy(faction.get("lastDecisionInfluences", {})),
+                "target": copy.deepcopy(faction.get("lastDecisionTarget")),
             })
             if action in {"attack", "raid_settlements", "split_into_new_factions", "collapse"}:
                 append_world_history_event(world, {
@@ -821,28 +832,201 @@ class WorldTick:
     def _choose_faction_action(self, world: WorldState, faction: dict[str, Any], hours: int) -> str:
         scores = self._faction_action_scores(world, faction, hours)
         rules = load_world_content().faction_rules.decisions
-        actions = sorted(scores)
-        weights = [
-            max(scores[action], 0) ** rules.weighted_draw_k
-            for action in actions
-        ]
-        total = sum(weights)
-        if total <= 0:
-            return actions[0]
         seed = self._stable_seed(
             f"faction_decision:{world.currentDay}:{faction.get('id', 'faction')}:{hours}",
             self.seed,
         )
-        roll = (seed % 2**32) / 2**32
-        threshold = roll * total
+        selected = self._weighted_faction_action(scores, seed, rules.weighted_draw_k)
+        modifiers = self._player_decision_modifiers(world, faction)
+        faction["lastDecisionFactors"] = {
+            category: any(value > 0 for value in bonuses.values())
+            for category, bonuses in modifiers.items()
+        }
+        influences: dict[str, bool] = {}
+        for category, bonuses in modifiers.items():
+            without_category = dict(scores)
+            for action, amount in bonuses.items():
+                without_category[action] -= amount
+            influences[category] = (
+                self._weighted_faction_action(
+                    without_category,
+                    seed,
+                    rules.weighted_draw_k,
+                )
+                != selected
+            )
+        faction["lastDecisionInfluences"] = influences
+        return selected
+
+    @staticmethod
+    def _weighted_faction_action(scores: dict[str, int], seed: int, exponent: int) -> str:
+        actions = sorted(scores)
+        weights = [max(scores[action], 0) ** exponent for action in actions]
+        total = sum(weights)
+        if total <= 0:
+            return actions[0]
+        threshold = (seed % 2**32) / 2**32 * total
         cumulative = 0.0
-        selected = actions[-1]
         for action, weight in zip(actions, weights):
             cumulative += weight
             if threshold < cumulative:
-                selected = action
-                break
-        return selected
+                return action
+        return actions[-1]
+
+    def _player_decision_modifiers(
+        self,
+        world: WorldState,
+        faction: dict[str, Any],
+    ) -> dict[str, dict[str, int]]:
+        rules = load_world_content().faction_rules
+        decision_rules = rules.decisions
+        modifiers = {
+            "hostile_disposition": {},
+            "friendly_disposition": {},
+            "attention_pressure": {},
+        }
+        dispositions = faction.get("player_dispositions", {})
+        if isinstance(dispositions, dict):
+            for player_id in sorted(dispositions):
+                try:
+                    disposition = int(dispositions[player_id])
+                except (TypeError, ValueError):
+                    continue
+                if disposition <= -decision_rules.player_hostile_threshold:
+                    bonus = max(
+                        decision_rules.minimum_player_decision_bonus,
+                        abs(disposition) * decision_rules.player_hostile_action_weight
+                        // rules.max_player_disposition,
+                    )
+                    modifiers["hostile_disposition"]["raid_settlements"] = (
+                        modifiers["hostile_disposition"].get("raid_settlements", 0) + bonus
+                    )
+                    modifiers["hostile_disposition"]["attack"] = (
+                        modifiers["hostile_disposition"].get("attack", 0) + bonus
+                    )
+                elif disposition >= decision_rules.player_friendly_threshold:
+                    bonus = max(
+                        decision_rules.minimum_player_decision_bonus,
+                        disposition * decision_rules.player_friendly_action_weight
+                        // rules.max_player_disposition,
+                    )
+                    modifiers["friendly_disposition"]["trade"] = (
+                        modifiers["friendly_disposition"].get("trade", 0) + bonus
+                    )
+                    modifiers["friendly_disposition"]["negotiate"] = (
+                        modifiers["friendly_disposition"].get("negotiate", 0) + bonus
+                    )
+
+        attention_by_player: dict[str, int] = {}
+        for settlement in world.settlements:
+            if not isinstance(settlement, dict):
+                continue
+            attention = settlement.get("attention_by_player", {})
+            if not isinstance(attention, dict):
+                continue
+            for player_id in sorted(attention):
+                try:
+                    value = max(0, int(attention[player_id]))
+                except (TypeError, ValueError):
+                    continue
+                attention_by_player[player_id] = (
+                    attention_by_player.get(player_id, 0) + value
+                )
+
+        for player_id in sorted(attention_by_player):
+            attention = min(rules.max_player_attention, attention_by_player[player_id])
+            if attention <= 0:
+                continue
+            bonus = max(
+                decision_rules.minimum_player_decision_bonus,
+                attention * decision_rules.attention_pressure_weight
+                // rules.max_player_attention,
+            )
+            for action in ("attack", "raid_settlements"):
+                modifiers["attention_pressure"][action] = (
+                    modifiers["attention_pressure"].get(action, 0) + bonus
+                )
+        return modifiers
+
+    def _select_player_decision_target(
+        self,
+        world: WorldState,
+        faction: dict[str, Any],
+        action: str,
+    ) -> dict[str, str] | None:
+        faction_rules = load_world_content().faction_rules
+        decision_rules = faction_rules.decisions
+        dispositions = faction.get("player_dispositions", {})
+        candidates: list[tuple[int, str, str]] = []
+        if not isinstance(dispositions, dict):
+            dispositions = {}
+        for settlement in world.settlements:
+            if not isinstance(settlement, dict):
+                continue
+            attention = settlement.get("attention_by_player", {})
+            if not isinstance(attention, dict):
+                attention = {}
+            for player_id in sorted(set(dispositions) | set(attention)):
+                try:
+                    disposition = int(dispositions.get(player_id, 0))
+                    player_attention = int(attention.get(player_id, 0))
+                except (TypeError, ValueError):
+                    continue
+                if action in {"attack", "raid_settlements"}:
+                    is_relevant = (
+                        disposition <= -decision_rules.player_hostile_threshold
+                        or player_attention > 0
+                    )
+                    hostility = abs(min(0, disposition))
+                    priority = (
+                        hostility * faction_rules.max_player_attention + player_attention
+                        if hostility >= decision_rules.player_hostile_threshold
+                        else player_attention
+                    )
+                elif action in {"trade", "negotiate"}:
+                    is_relevant = disposition >= decision_rules.player_friendly_threshold
+                    priority = disposition
+                else:
+                    is_relevant = False
+                    priority = 0
+                settlement_player_id = settlement.get(
+                    "founderId",
+                    settlement.get("founder_id", settlement.get("player_id")),
+                )
+                if settlement_player_id not in {None, player_id} and player_attention <= 0:
+                    continue
+                if settlement_player_id is None and player_attention <= 0:
+                    player = next(
+                        (
+                            item for item in world.players
+                            if isinstance(item, dict)
+                            and str(item.get("id")) == str(player_id)
+                        ),
+                        None,
+                    )
+                    player_location = resolve_location_id(
+                        world.to_dict(),
+                        player.get("location") if player else None,
+                    )
+                    settlement_location = settlement.get(
+                        "location_id",
+                        settlement.get("location"),
+                    )
+                    if player_location is None or settlement_location != player_location:
+                        continue
+                if is_relevant and priority > 0:
+                    candidates.append((
+                        priority,
+                        str(player_id),
+                        str(settlement.get("id", settlement.get("location_id", ""))),
+                    ))
+        if not candidates:
+            return None
+        priority, player_id, settlement_id = sorted(
+            candidates,
+            key=lambda item: (-item[0], item[1], item[2]),
+        )[0]
+        return {"playerId": player_id, "settlementId": settlement_id}
 
     def _faction_action_scores(
         self,
@@ -881,6 +1065,10 @@ class WorldTick:
         )
         scores["raid_settlements"] += needed_settlements * rules.settlement_need_weight
         scores["trade"] += needed_settlements * rules.settlement_need_weight
+        player_modifiers = self._player_decision_modifiers(world, faction)
+        for bonuses in player_modifiers.values():
+            for action, bonus in bonuses.items():
+                scores[action] = scores.get(action, 0) + bonus
         if ideology == "resource_acquisition":
             scores["raid_settlements"] += 12
             scores["trade"] += 8

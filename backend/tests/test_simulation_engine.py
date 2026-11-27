@@ -358,6 +358,7 @@ def test_current_social_and_settlement_actions_change_registry_state():
             "population": 20,
             "morale": 50,
             "stores": {"food": 4},
+            "faction_id": "faction_survivors",
             "leader_npc_id": "npc_leader",
         }],
         "npcs": {"npc_leader": {"id": "npc_leader", "loyalty": 50}},
@@ -395,6 +396,37 @@ def test_current_social_and_settlement_actions_change_registry_state():
     created = next(item for item in founded["settlements"] if item["id"] == "new-camp")
     assert created["morale"] == 51
     assert founded["npcs"]["npc_leader"]["loyalty"] == 51
+
+
+def test_send_mission_changes_the_target_players_faction_disposition():
+    world = {
+        "currentDay": 1,
+        "currentTime": "08:00",
+        "players": [
+            {"id": "player_1", "location": "school"},
+            {"id": "player_2", "location": "school", "factionId": "faction_target"},
+        ],
+        "locations": [{"id": "school", "name": "School"}],
+        "factions": [
+            {"id": "faction_survivors", "player_dispositions": {"player_1": 0}},
+            {"id": "faction_target", "player_dispositions": {"player_1": 0}},
+        ],
+        "resources": {"water": 5},
+    }
+
+    result = SimulationEngine(seed=1).apply(
+        world,
+        StructuredAction(
+            actionId="mission-target-faction",
+            actionType="send_mission",
+            actor="player_1",
+            target="player_2",
+        ),
+        rules="current",
+    )
+
+    assert result.updatedWorldState["factions"][0]["player_dispositions"]["player_1"] == 0
+    assert result.updatedWorldState["factions"][1]["player_dispositions"]["player_1"] == 1
 
 
 def test_registry_effect_vocabulary_uses_clamped_player_updates(monkeypatch):
@@ -483,9 +515,9 @@ def test_registry_effect_vocabulary_uses_clamped_player_updates(monkeypatch):
     assert player["inventory"] == ["new_tool"]
     assert [effect["name"] for effect in player["statusEffects"]] == ["new_status"]
     assert result.updatedWorldState["locations"][1]["flags"]["signaled"] == 1
-    assert result.updatedWorldState["factions"][0]["player_dispositions"]["player_1"] == 2
-    assert result.updatedWorldState["settlements"][0]["morale"] == 42
-    assert result.updatedWorldState["npcs"]["npc_test"]["loyalty"] == 52
+    assert result.updatedWorldState["factions"][0]["player_dispositions"]["player_1"] == 3
+    assert result.updatedWorldState["settlements"][0]["morale"] == 44
+    assert result.updatedWorldState["npcs"]["npc_test"]["loyalty"] == 55
 
 
 def test_policy_action_commits_without_advancing_calendar():

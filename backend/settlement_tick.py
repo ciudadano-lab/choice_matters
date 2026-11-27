@@ -163,6 +163,7 @@ class SettlementTick:
         day: int,
     ) -> dict[str, Any]:
         before_stores = copy.deepcopy(settlement["stores"])
+        self._decay_player_attention(settlement)
         population_before = max(0, self._int_value(settlement.get("population"), 0))
         location = self._find_location(
             world.locations,
@@ -289,6 +290,29 @@ class SettlementTick:
             },
             "weekly": weekly_changes,
         }
+
+    def _decay_player_attention(self, settlement: dict[str, Any]) -> None:
+        attention = settlement.get("attention_by_player")
+        if not isinstance(attention, dict):
+            return
+        faction_rules = self.content.faction_rules
+        for player_id in sorted(tuple(attention)):
+            try:
+                current = max(0, int(attention[player_id]))
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"Invalid attention value for player {player_id!r}: "
+                    f"{attention[player_id]!r}"
+                )
+            updated = max(
+                0,
+                min(faction_rules.max_player_attention, current)
+                - faction_rules.attention_decay_per_day,
+            )
+            if updated:
+                attention[player_id] = updated
+            else:
+                attention.pop(player_id)
 
     def _advance_status(
         self,

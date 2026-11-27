@@ -7,6 +7,10 @@
     "protect_civilians"
   ],
   "faction_disposition_scale_factor": 5,
+  "max_effect_change": 5,
+  "max_player_attention": 100,
+  "attention_decay_per_day": 1,
+  "max_player_disposition": 100,
   "surface_faction_events_to_active_events": true,
   "retention": {
     "active_events": 25,
@@ -50,6 +54,12 @@
     "recruiting_capacity_weight": 35,
     "hostile_disposition_weight": 14,
     "friendly_disposition_weight": 14,
+    "player_hostile_threshold": 30,
+    "player_friendly_threshold": 30,
+    "player_hostile_action_weight": 24,
+    "player_friendly_action_weight": 20,
+    "attention_pressure_weight": 20,
+    "minimum_player_decision_bonus": 1,
     "goal_action_bonus": 12,
     "goal_action_targets": {
       "stay_alive": "recruit_survivors",

@@ -159,6 +159,15 @@ def test_world_sim_reports_settlement_history_and_is_deterministic():
         for run in first["runs"]
         for snapshot in run["daily"]
     )
+    assert set(first["summary"]["decision_influence"]) == {
+        "hostile_disposition",
+        "friendly_disposition",
+        "attention_pressure",
+    }
+    assert all(
+        values["decisions"] > 0
+        for values in first["summary"]["decision_influence"].values()
+    )
 
 
 def test_world_sim_scenarios_report_depleted_and_high_unrest_paths():

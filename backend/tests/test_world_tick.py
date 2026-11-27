@@ -1,3 +1,5 @@
+import copy
+
 import pytest
 
 from simulation_engine import SimulationEngine, StructuredAction
@@ -350,6 +352,137 @@ def test_weighted_faction_decisions_are_deterministic_and_use_scoring():
     )
     assert first_scores["raid_settlements"] > 8
     assert first_scores["trade"] > 20
+
+
+def test_player_disposition_and_attention_change_faction_scores_and_targets():
+    world = WorldState.from_dict({
+        "currentDay": 7,
+        "players": [
+            {"id": "hostile_player", "location": "hostile_site"},
+            {"id": "friendly_player", "location": "friendly_site"},
+            {"id": "signaller", "location": "signal_site"},
+        ],
+        "locations": [
+            {"id": "hostile_site", "name": "Hostile Site"},
+            {"id": "friendly_site", "name": "Friendly Site"},
+            {"id": "signal_site", "name": "Signal Site"},
+        ],
+        "settlements": [
+            {
+                "id": "hostile_settlement",
+                "location_id": "hostile_site",
+                "founderId": "hostile_player",
+                "faction_id": "faction_test",
+                "population": 10,
+                "stores": {"food": 10, "water": 10},
+            },
+            {
+                "id": "friendly_settlement",
+                "location_id": "friendly_site",
+                "founderId": "friendly_player",
+                "faction_id": "faction_test",
+                "population": 10,
+                "stores": {"food": 10, "water": 10},
+            },
+            {
+                "id": "signalled_settlement",
+                "location_id": "signal_site",
+                "founderId": "signaller",
+                "faction_id": "faction_test",
+                "population": 10,
+                "stores": {"food": 10, "water": 10},
+                "attention_by_player": {"signaller": 100},
+            },
+        ],
+        "factions": [{
+            "id": "faction_test",
+            "population": 30,
+            "militaryStrength": 2,
+            "resources": {"food": 10, "water": 10},
+            "territory": ["hostile_site", "friendly_site", "signal_site"],
+            "relationships": {},
+            "player_dispositions": {
+                "hostile_player": -90,
+                "friendly_player": 90,
+                "signaller": 0,
+            },
+            "goals": [],
+        }],
+    })
+    tick = WorldTick(seed=17)
+    faction = world.factions[0]
+    with_influence = tick._faction_action_scores(world, faction, 24)
+    baseline_world = copy.deepcopy(world)
+    baseline_faction = baseline_world.factions[0]
+    baseline_faction["player_dispositions"] = {}
+    baseline_world.settlements[2].pop("attention_by_player")
+    without_influence = tick._faction_action_scores(
+        baseline_world,
+        baseline_faction,
+        24,
+    )
+
+    assert with_influence["attack"] > without_influence["attack"]
+    assert with_influence["raid_settlements"] > without_influence["raid_settlements"]
+    assert with_influence["trade"] > without_influence["trade"]
+    assert with_influence["negotiate"] > without_influence["negotiate"]
+    assert tick._select_player_decision_target(
+        world,
+        faction,
+        "attack",
+    ) == {
+        "playerId": "hostile_player",
+        "settlementId": "hostile_settlement",
+    }
+    assert tick._select_player_decision_target(
+        world,
+        faction,
+        "trade",
+    ) == {
+        "playerId": "friendly_player",
+        "settlementId": "friendly_settlement",
+    }
+    faction_without_hostility = copy.deepcopy(faction)
+    faction_without_hostility["player_dispositions"].pop("hostile_player")
+    assert tick._select_player_decision_target(
+        world,
+        faction_without_hostility,
+        "raid_settlements",
+    ) == {
+        "playerId": "signaller",
+        "settlementId": "signalled_settlement",
+    }
+
+
+def test_settlement_attention_is_capped_and_decays_daily():
+    world = WorldState.from_dict({
+        "currentDay": 1,
+        "players": [],
+        "locations": [{"id": "camp", "type": "school"}],
+        "settlements": [{
+            "id": "camp_settlement",
+            "location_id": "camp",
+            "population": 10,
+            "status": "stable",
+            "stores": {"food": 20, "water": 20},
+            "attention_by_player": {
+                "player_1": 5,
+                "player_2": 1,
+                "player_3": 200,
+            },
+        }],
+    })
+
+    WorldTick(seed=5).settlement_tick.advance_days(
+        world,
+        1,
+        first_day=2,
+    )
+
+    assert world.settlements[0]["attention_by_player"] == {
+        "player_1": 4,
+        "player_3": 99,
+    }
 
 
 def test_world_tick_autopilot_biases_alliance_toward_diplomacy():

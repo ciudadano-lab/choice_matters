@@ -376,7 +376,19 @@ def _make_id(name: str, index: int) -> str:
     return f"location_{normalized}_{index}"
 
 
-def _build_world_layers(seed: int, locations: list[dict[str, Any]], rumors: list[dict[str, Any]], *, geography: list[dict[str, Any]] | None = None, factions: list[dict[str, Any]] | None = None, resources: dict[str, Any] | None = None, cityLayout: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+def _build_world_layers(
+    seed: int,
+    locations: list[dict[str, Any]],
+    rumors: list[dict[str, Any]],
+    *,
+    geography: list[dict[str, Any]] | None = None,
+    factions: list[dict[str, Any]] | None = None,
+    settlements: list[dict[str, Any]] | None = None,
+    players: list[dict[str, Any]] | None = None,
+    prior_known_world: dict[str, Any] | None = None,
+    resources: dict[str, Any] | None = None,
+    cityLayout: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     actual_world = {
         "seed": seed,
         "locations": copy.deepcopy(locations),
@@ -390,10 +402,28 @@ def _build_world_layers(seed: int, locations: list[dict[str, Any]], rumors: list
         for location in locations
         if location.get("discovered", False) and location.get("locationKind") != "discoverable"
     ]
+    prior_players = (
+        prior_known_world.get("players", {})
+        if isinstance(prior_known_world, dict)
+        else {}
+    )
+    known_players = copy.deepcopy(prior_players) if isinstance(prior_players, dict) else {}
+    for player in players or []:
+        if not isinstance(player, dict) or player.get("id") is None:
+            continue
+        player_known = known_players.setdefault(str(player["id"]), {})
+        if not isinstance(player_known, dict):
+            player_known = {}
+            known_players[str(player["id"])] = player_known
+        player_known.setdefault("factions", {})
+        player_known.setdefault("settlements", {})
     player_known_world = {
         "seed": seed,
         "locations": known_locations,
         "rumors": copy.deepcopy(rumors),
+        "factions": [],
+        "settlements": [],
+        "players": known_players,
     }
     rumored_world = {
         "seed": seed,
@@ -949,6 +979,9 @@ def _refresh_layers_for_state(world_state: "WorldState" | dict[str, Any], *, see
             state_rumors,
             geography=state_geography,
             factions=state_factions,
+            settlements=world_state.get("settlements", []),
+            players=world_state.get("players", []),
+            prior_known_world=world_state.get("playerKnownWorld", {}),
             resources=state_resources,
             cityLayout=state_city_layout,
         )
@@ -970,6 +1003,9 @@ def _refresh_layers_for_state(world_state: "WorldState" | dict[str, Any], *, see
         state_rumors,
         geography=state_geography,
         factions=state_factions,
+        settlements=world_state.settlements,
+        players=world_state.players,
+        prior_known_world=world_state.playerKnownWorld,
         resources=state_resources,
         cityLayout=state_city_layout,
     )
@@ -1366,6 +1402,9 @@ class WorldState:
             self.rumors,
             geography=self.geography,
             factions=self.factions,
+            settlements=self.settlements,
+            players=self.players,
+            prior_known_world=self.playerKnownWorld,
             resources=self.resources,
             cityLayout=self.cityLayout,
         )
@@ -1416,6 +1455,20 @@ class WorldState:
             rumoredWorld=_coerce_dict(raw.get("rumoredWorld"), {}),
             proposedDiscoveries=_coerce_list(raw.get("proposedDiscoveries"), []),
         )
+        state.playerKnownWorld.setdefault("factions", [])
+        state.playerKnownWorld.setdefault("settlements", [])
+        known_players = state.playerKnownWorld.setdefault("players", {})
+        if not isinstance(known_players, dict):
+            known_players = {}
+            state.playerKnownWorld["players"] = known_players
+        if isinstance(known_players, dict):
+            for player in state.players:
+                if not isinstance(player, dict) or player.get("id") is None:
+                    continue
+                player_known = known_players.setdefault(str(player["id"]), {})
+                if isinstance(player_known, dict):
+                    player_known.setdefault("factions", {})
+                    player_known.setdefault("settlements", {})
         for player in state.players:
             if isinstance(player, dict):
                 _ensure_player_entities(player)

@@ -31,6 +31,7 @@ from plan_features import PlanFeatures
 from simulation_engine import StructuredAction
 from world_state import WorldState, generate_initial_world_state
 from world_tick import WorldEventQueue, WorldTick
+from world_content import load_world_content
 
 
 TARGET_MEAN_DAYS_BETWEEN_WORLD_PAUSES = (5.0, 10.0)
@@ -841,6 +842,27 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
     for seed in range(1, seeds + 1):
         world = generate_initial_world_state([], seed)
         world.players = []
+        faction_rules = load_world_content().faction_rules
+        influence_factions = sorted(
+            (item for item in world.factions if isinstance(item, dict)),
+            key=lambda item: str(item.get("id", "")),
+        )
+        if influence_factions:
+            influence_factions[0].setdefault("player_dispositions", {})[
+                "player_1"
+            ] = -faction_rules.max_player_disposition
+        if len(influence_factions) > 1:
+            influence_factions[1].setdefault("player_dispositions", {})[
+                "player_1"
+            ] = faction_rules.max_player_disposition
+        if world.settlements:
+            target_settlement = min(
+                world.settlements,
+                key=lambda item: str(item.get("id", "")),
+            )
+            target_settlement.setdefault("attention_by_player", {})[
+                "player_1"
+            ] = faction_rules.max_player_attention
         initial_dispositions = {
             str(source.get("id", "")): {
                 str(target): int(score)
@@ -884,6 +906,14 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
         tick = WorldTick(seed=seed)
         daily: list[dict[str, Any]] = []
         action_totals: dict[str, int] = {}
+        decision_influence_counts = {
+            category: {"decisions": 0, "changed_decisions": 0}
+            for category in (
+                "hostile_disposition",
+                "friendly_disposition",
+                "attention_pressure",
+            )
+        }
         for _ in range(days):
             world = tick.advance(
                 world,
@@ -895,6 +925,14 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
                 for faction in world.factions:
                     if not isinstance(faction, dict):
                         continue
+                    if faction.get("lastDecisionDay") == world.currentDay:
+                        factors = faction.get("lastDecisionFactors", {})
+                        influences = faction.get("lastDecisionInfluences", {})
+                        for category, counts in decision_influence_counts.items():
+                            if factors.get(category):
+                                counts["decisions"] += 1
+                            if influences.get(category):
+                                counts["changed_decisions"] += 1
                     action = faction.get("lastAction")
                     if action is not None:
                         action_totals[str(action)] = action_totals.get(str(action), 0) + 1
@@ -955,6 +993,7 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
             "seed": seed,
             "daily": daily,
             "action_distribution": action_totals,
+            "decision_influence": decision_influence_counts,
             "faction_count_final": len(world.factions),
         })
 
@@ -1017,6 +1056,20 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
                 )
                 for run in runs
             ),
+            "decision_influence": {
+                category: {
+                    field: sum(
+                        run["decision_influence"][category][field]
+                        for run in runs
+                    )
+                    for field in ("decisions", "changed_decisions")
+                }
+                for category in (
+                    "hostile_disposition",
+                    "friendly_disposition",
+                    "attention_pressure",
+                )
+            },
             "faction_counts": faction_counts,
             "final_status_distribution": {
                 status: sum(
@@ -1768,6 +1821,13 @@ def main(argv: list[str] | None = None) -> int:
                 f"mean_population={report['summary']['mean_final_population']:.1f} "
                 f"mean_stores={report['summary']['mean_final_stores']}"
             )
+            print("\nPlayer-influence decision changes:")
+            print("influence              decisions  changed")
+            for category, counts in report["summary"]["decision_influence"].items():
+                print(
+                    f"{category:<22} {counts['decisions']:>9} "
+                    f"{counts['changed_decisions']:>8}"
+                )
         print(f"Wrote {args.out / 'world_sim.json'}")
         return 0
 

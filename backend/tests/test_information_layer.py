@@ -195,3 +195,190 @@ def test_information_layer_resolves_name_in_id_keyed_location_mapping():
     assert state["locations"]["location_clinic"]["knownInformation"][0]["content"] == (
         "The clinic is occupied."
     )
+
+
+def test_player_scoped_discoveries_and_location_reports_do_not_leak():
+    world = WorldState.from_dict({
+        "players": [
+            {"id": "player_1", "location": "school"},
+            {"id": "player_2", "location": "school"},
+        ],
+        "locations": [{
+            "id": "school",
+            "name": "School",
+            "discovered": True,
+            "knownInformation": [],
+            "visibleState": {"status": "unknown"},
+        }],
+        "factions": [{
+            "id": "faction_hidden",
+            "name": "Hidden Faction",
+            "goals": ["secret_goal"],
+            "resources": {"food": 99},
+            "player_dispositions": {"player_2": -80},
+            "ideology_tags": ["security"],
+            "leader_npc_id": "npc_leader",
+            "territory": ["school"],
+            "strength": 4,
+            "militaryStrength": 3,
+            "stances": {"faction_other": "hostile"},
+        }],
+        "settlements": [{
+            "id": "hidden_settlement",
+            "name": "Hidden Camp",
+            "location_id": "school",
+            "location": "school",
+            "faction_id": "faction_hidden",
+            "status": "stable",
+            "population": 12,
+            "morale": 70,
+            "unrest": 5,
+            "defense": 20,
+            "stores": {"food": 15},
+            "attention_by_player": {"player_2": 50},
+        }],
+    })
+    layer = InformationLayer()
+    layer.apply_information(
+        world,
+        {
+            "player_id": "player_2",
+            "source": "direct_observation",
+            "reliability": 0.9,
+            "confidence": 0.9,
+            "timestamp": 1,
+            "content": "The camp is occupied.",
+        },
+        target_location="school",
+    )
+    layer.discover_faction(
+        world,
+        player_id="player_2",
+        faction_id="faction_hidden",
+        level="known",
+    )
+    layer.discover_settlement(
+        world,
+        player_id="player_2",
+        settlement_id="hidden_settlement",
+        level="known",
+    )
+    world.refresh_layers()
+
+    player_a_visible = layer.get_visible_state(world, player_id="player_1")
+    player_b_visible = layer.get_visible_state(world, player_id="player_2")
+    player_a_world = layer.get_player_known_world(world, player_id="player_1")
+    player_b_world = layer.get_player_known_world(world, player_id="player_2")
+
+    assert player_a_visible["school"]["knownInformation"] == []
+    assert player_a_visible["school"]["visibleState"] == {"status": "unknown"}
+    assert player_b_visible["school"]["knownInformation"][0]["content"] == (
+        "The camp is occupied."
+    )
+    assert player_a_world["factions"] == []
+    assert player_a_world["settlements"] == []
+    assert player_b_world["factions"][0]["discoveryLevel"] == "known"
+    assert "goals" not in player_b_world["factions"][0]
+    assert "resources" not in player_b_world["factions"][0]
+    assert "player_dispositions" not in player_b_world["factions"][0]
+    assert "attention_by_player" not in player_b_world["settlements"][0]
+
+
+def test_discovery_levels_are_monotonic_and_control_visible_fields():
+    world = WorldState.from_dict({
+        "players": [{"id": "player_1"}],
+        "factions": [{
+            "id": "faction_known",
+            "name": "Known Group",
+            "goals": ["hidden"],
+            "ideology_tags": ["cooperation"],
+            "leader_npc_id": "npc_leader",
+            "territory": ["school"],
+            "strength": 3,
+            "resources": {"food": 100},
+        }],
+        "settlements": [],
+    })
+    layer = InformationLayer()
+
+    layer.discover_faction(
+        world,
+        player_id="player_1",
+        faction_id="faction_known",
+        level="met",
+    )
+    layer.discover_faction(
+        world,
+        player_id="player_1",
+        faction_id="faction_known",
+        level="heard_of",
+    )
+    met_view = layer.get_player_known_world(world, player_id="player_1")
+    assert met_view["factions"][0]["discoveryLevel"] == "met"
+    assert "ideology_tags" in met_view["factions"][0]
+    assert "territory" not in met_view["factions"][0]
+    assert "goals" not in met_view["factions"][0]
+
+    layer.discover_faction(
+        world,
+        player_id="player_1",
+        faction_id="faction_known",
+        level="known",
+    )
+    known_view = layer.get_player_known_world(world, player_id="player_1")
+    assert known_view["factions"][0]["discoveryLevel"] == "known"
+    assert "territory" in known_view["factions"][0]
+
+
+def test_client_state_projects_only_recipient_discoveries():
+    from main import build_client_state
+
+    world = WorldState.from_dict({
+        "players": [
+            {"id": "player_1", "location": "school"},
+            {"id": "player_2", "location": "school"},
+        ],
+        "locations": [{"id": "school", "name": "School", "discovered": True}],
+        "factions": [{
+            "id": "faction_hidden",
+            "name": "Hidden Faction",
+            "goals": ["secret"],
+            "resources": {"food": 10},
+        }],
+        "settlements": [{
+            "id": "hidden_settlement",
+            "name": "Hidden Settlement",
+            "location_id": "school",
+            "faction_id": "faction_hidden",
+            "population": 10,
+            "morale": 50,
+            "stores": {"food": 10},
+        }],
+    })
+    layer = InformationLayer()
+    layer.discover_faction(
+        world,
+        player_id="player_2",
+        faction_id="faction_hidden",
+        level="met",
+    )
+    layer.discover_settlement(
+        world,
+        player_id="player_2",
+        settlement_id="hidden_settlement",
+        level="met",
+    )
+    room = {
+        "players": {"1": {}, "2": {}},
+        "world_state": world.to_dict(),
+    }
+
+    visible_to_a = build_client_state(room, 1)["world_state"]
+    visible_to_b = build_client_state(room, 2)["world_state"]
+
+    assert visible_to_a["factions"] == []
+    assert visible_to_a["settlements"] == []
+    assert visible_to_b["factions"][0]["id"] == "faction_hidden"
+    assert visible_to_b["settlements"][0]["id"] == "hidden_settlement"
+    assert "goals" not in visible_to_b["factions"][0]
+    assert "resources" not in visible_to_b["factions"][0]

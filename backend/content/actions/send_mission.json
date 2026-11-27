@@ -9,7 +9,7 @@
   "effects": [
     {"type": "change_resource", "resource": "water", "amount": -1},
     {"type": "change_stat", "target": "target", "stat": "stress", "amount": 2},
-    {"type": "change_faction_disposition", "faction_id": "faction_survivors", "player_id": "actor", "amount": 1, "rules": "current"},
+    {"type": "change_faction_disposition", "player_id": "actor", "amount": 1, "rules": "current"},
     {"type": "change_settlement_stat", "settlement_id": "target", "stat": "attention", "amount": 1, "rules": "current"}
   ],
   "status": "live",
