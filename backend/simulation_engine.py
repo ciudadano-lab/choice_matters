@@ -9,7 +9,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
-from action_registry import EFFECT_HANDLER_NAMES, get_live_actions
+from action_registry import EFFECT_HANDLER_NAMES, EffectRecord, get_live_actions
 from economy import apply_action_yield, cap_resource_stores, get_health_recovery_config
 from probability_config import (
     DEFAULT_PLAN_QUALITY,
@@ -1147,6 +1147,78 @@ class SimulationEngine:
             handler = getattr(self, handler_name)
             handler(state, action, result, effect, additive)
 
+    def apply_effect_records_to_state(
+        self,
+        state: dict[str, Any],
+        action: StructuredAction,
+        effects: list[dict[str, Any]],
+    ) -> None:
+        effect_records = [
+            EffectRecord.model_validate(effect)
+            for effect in effects
+        ]
+        result: dict[str, Any] = {
+            "resourceChanges": {},
+            "playerStatusChanges": [],
+            "locationChanges": [],
+            "informationDiscovered": [],
+        }
+        for effect in effect_records:
+            if effect.rules not in {"all", "current"}:
+                continue
+            handler = getattr(self, EFFECT_HANDLER_NAMES[effect.type])
+            handler(state, action, result, effect, True)
+
+        if result["resourceChanges"]:
+            resources = state.setdefault("resources", {})
+            for resource, delta in result["resourceChanges"].items():
+                resources[resource] = max(
+                    0,
+                    int(resources.get(resource, 0)) + int(delta),
+                )
+        for change in result["playerStatusChanges"]:
+            player = self._get_player(state, change.get("playerId", action.actor))
+            if player is None:
+                continue
+            for key, value in change.items():
+                if key == "playerId":
+                    continue
+                if isinstance(value, (int, float)) and key in {
+                    "health", "stamina", "hunger", "thirst", "stress",
+                }:
+                    player[key] = clamp_player_stat(player.get(key, 0) + value)
+                else:
+                    player[key] = value
+        if result["informationDiscovered"]:
+            state.setdefault("discoveredInformation", []).extend(
+                result["informationDiscovered"]
+            )
+            from information_layer import InformationLayer
+
+            location_id = resolve_location_id(state, action.target)
+            if location_id is None:
+                player = self._get_player(state, action.actor)
+                location_id = (
+                    resolve_location_id(state, player.get("location"))
+                    if player is not None
+                    else None
+                )
+            if location_id is not None:
+                information_layer = InformationLayer()
+                for information in result["informationDiscovered"]:
+                    information_layer.apply_information(
+                        state,
+                        {
+                            "source": "tactical_encounter",
+                            "reliability": 0.8,
+                            "confidence": 0.8,
+                            "timestamp": state.get("currentDay", 1),
+                            "player_id": information.get("player_id", action.actor),
+                            "content": information.get("content", ""),
+                        },
+                        target_location=location_id,
+                    )
+
     def _effect_change_resource(
         self, state: dict[str, Any], action: StructuredAction, result: dict[str, Any],
         effect: Any, additive: bool,
@@ -1211,6 +1283,47 @@ class SimulationEngine:
         effect: Any, additive: bool,
     ) -> None:
         self._apply_flag_effect(state, action, effect)
+
+    def _effect_change_location_stat(
+        self, state: dict[str, Any], action: StructuredAction, result: dict[str, Any],
+        effect: Any, additive: bool,
+    ) -> None:
+        if effect.stat != "noise" or effect.amount is None:
+            raise ValueError(
+                f"{action.actionType}: change_location_stat supports noise and requires amount"
+            )
+        location_id = resolve_location_id(state, effect.location or action.target)
+        location = self._get_location(state, location_id) if location_id else None
+        if location is None:
+            raise ValueError(
+                f"{action.actionType}: noise target location {action.target!r} is missing"
+            )
+        from tactical_options import load_tactical_options
+
+        maximum = load_tactical_options().max_location_noise
+        noise = int(location.get("noise", 0)) + int(effect.amount)
+        location["noise"] = max(0, min(maximum, noise))
+
+    def _effect_discover_information(
+        self, state: dict[str, Any], action: StructuredAction, result: dict[str, Any],
+        effect: Any, additive: bool,
+    ) -> None:
+        if not effect.information:
+            raise ValueError(
+                f"{action.actionType}: discover_information requires information"
+            )
+        digest = hashlib.sha256(
+            f"{action.actionId}:{state.get('currentDay', 1)}:{effect.information}".encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        result.setdefault("informationDiscovered", []).append({
+            "id": f"tactical_{digest[:16]}",
+            "content": effect.information,
+            "player_id": action.actor,
+            "source": "tactical_encounter",
+            "timestamp": state.get("currentDay", 1),
+        })
 
     def _effect_change_faction_disposition(
         self, state: dict[str, Any], action: StructuredAction, result: dict[str, Any],

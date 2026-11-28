@@ -29,6 +29,8 @@ EFFECT_HANDLER_NAMES = {
     "change_faction_disposition": "_effect_change_faction_disposition",
     "change_settlement_stat": "_effect_change_settlement_stat",
     "change_npc_loyalty": "_effect_change_npc_loyalty",
+    "change_location_stat": "_effect_change_location_stat",
+    "discover_information": "_effect_discover_information",
 }
 VALID_EFFECT_TYPES = frozenset(EFFECT_HANDLER_NAMES)
 
@@ -53,6 +55,7 @@ class EffectRecord(StrictModel):
     player_id: str | None = None
     settlement_id: str | None = None
     npc_id: str | None = None
+    information: str | None = None
     duration_days: StrictInt | None = None
 
     @field_validator("type")
@@ -64,6 +67,14 @@ class EffectRecord(StrictModel):
 
     @model_validator(mode="after")
     def validate_duration(self) -> EffectRecord:
+        if self.type == "change_location_stat" and (
+            self.stat is None or self.amount is None
+        ):
+            raise ValueError("change_location_stat requires stat and amount")
+        if self.type == "change_location_stat" and self.stat != "noise":
+            raise ValueError("change_location_stat currently supports only noise")
+        if self.type == "discover_information" and not self.information:
+            raise ValueError("discover_information requires information")
         if self.duration_days is not None:
             if self.type != "set_flag":
                 raise ValueError("duration_days is only valid for set_flag effects")

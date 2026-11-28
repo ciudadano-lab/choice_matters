@@ -3,7 +3,8 @@ import json
 
 import world_tick as world_tick_module
 from encounter_resolution import EncounterOutcome, resolve_pending_encounter
-from world_state import generate_initial_world_state
+from simulation_engine import SimulationEngine, StructuredAction
+from world_state import WorldState, generate_initial_world_state
 from world_tick import PausedRun, PendingEncounter, WorldEventQueue, WorldTick
 
 
@@ -273,4 +274,171 @@ def test_same_slot_resolution_uses_current_world_and_skips_a_newly_dead_actor(
         "skipped": True,
         "reason": "actor_dead",
     }
+
+
+def test_choices_are_scoped_to_the_pause_that_collected_them(monkeypatch):
+    tick = WorldTick(seed=8)
+    world, first_pause = tick.advance_period_until_interrupt(
+        _world(8),
+        WorldEventQueue(),
+        hours=24,
+    )
+    assert first_pause is not None
+
+    chosen_options = []
+
+    def record_choice(pending, current_state, *, chosen_option=None):
+        chosen_options.append(chosen_option)
+        return None, "actor_dead"
+
+    monkeypatch.setattr(
+        world_tick_module,
+        "resolve_pending_encounter",
+        record_choice,
+    )
+
+    pause_two_pending = PendingEncounter.from_dict(
+        first_pause.pending_encounters[0].to_dict()
+    )
+    pause_two_pending.action_id = "pause-two-action"
+    pause_two_pending.record_index = 0
+    process_slot = tick._process_policy_slot
+    pause_two_created = False
+
+    def create_second_pause(current_world, slot_name, room_state):
+        nonlocal pause_two_created
+        if not pause_two_created:
+            pause_two_created = True
+            pause_two_pending.day = current_world.currentDay
+            pause_two_pending.time = tick.slot_time_for_name(slot_name)
+            record = {
+                "day": current_world.currentDay,
+                "slot": slot_name,
+                "slotTime": pause_two_pending.time,
+                "playerId": pause_two_pending.player_id,
+                "actionType": pause_two_pending.action_type,
+                "outcomeTier": "success",
+                "rollLog": [],
+                "interruptStep": pause_two_pending.encounter_step,
+                "encounterOccurred": True,
+                "encounterOutcome": None,
+                "injuries": 0,
+            }
+            return current_world, [record], [pause_two_pending]
+        return process_slot(current_world, slot_name, room_state)
+
+    monkeypatch.setattr(tick, "_process_policy_slot", create_second_pause)
+
+    world, second_pause = tick.resume_period(
+        world,
+        WorldEventQueue(),
+        first_pause,
+        {"player_1": "hide"},
+    )
+    assert second_pause is not None
+    assert second_pause.decisions_collected == {}
+    assert chosen_options == ["hide"]
+
+    world, final_pause = tick.resume_period(
+        world,
+        WorldEventQueue(),
+        second_pause,
+    )
+
+    assert final_pause is None
+    assert chosen_options == ["hide", "hold"]
+
+
+def test_choices_can_differ_between_primary_and_ambient_encounters(monkeypatch):
+    world = _world(8, outdoors=True)
+    tick = WorldTick(seed=8)
+    first = PendingEncounter(
+        player_id="player_1",
+        action_id="primary",
+        action_type="search",
+        target="test_outdoors",
+        parameters={},
+        day=1,
+        time="22:00",
+        seed=8,
+        plan_quality=0.0,
+        encounter_step="encounter",
+        step_index=0,
+        roll_log=[],
+        is_ambient=False,
+        outcome_tier="success",
+        record_index=0,
+    )
+    ambient = PendingEncounter.from_dict(first.to_dict())
+    ambient.action_id = "ambient"
+    ambient.action_type = "ambient_noise"
+    ambient.is_ambient = True
+    ambient.record_index = 1
+    records = [
+        {"playerId": "player_1", "injuries": 0},
+        {"playerId": "player_1", "injuries": 0},
+    ]
+    chosen_options = []
+
+    def record_choice(pending, current_state, *, chosen_option=None):
+        chosen_options.append(chosen_option)
+        return None, "actor_dead"
+
+    monkeypatch.setattr(
+        world_tick_module,
+        "resolve_pending_encounter",
+        record_choice,
+    )
+
+    tick._resolve_pending_encounters(
+        WorldState.from_dict(world),
+        [first, ambient],
+        records,
+        {"player_1": {"primary": "fight", "ambient": "hide"}},
+        use_bot_policy=False,
+    )
+
+    assert chosen_options == ["fight", "hide"]
+    chosen_options.clear()
+    tick._resolve_pending_encounters(
+        WorldState.from_dict(world),
+        [first, ambient],
+        records,
+        {"player_1": "hold"},
+        use_bot_policy=False,
+    )
+    assert chosen_options == ["hold", "hold"]
+
+
+def test_ambient_commit_skips_discovery_and_tactical_side_effects(monkeypatch):
+    world = _world(8, outdoors=True)
+    action = StructuredAction(
+        actionId="ambient-noise-noop",
+        actionType="ambient_noise",
+        actor="player_1",
+        target="test_outdoors",
+        parameters={"seed": 8},
+    )
+    result = SimulationEngine(seed=8).apply(world, action, rules="current")
+    tick = WorldTick(seed=8)
+
+    def unexpected_call(*args, **kwargs):
+        raise AssertionError("ambient_noise must not trigger player discovery side effects")
+
+    monkeypatch.setattr(
+        world_tick_module._information_layer,
+        "record_action_discoveries",
+        unexpected_call,
+    )
+    monkeypatch.setattr(tick, "_apply_tactical_side_effects", unexpected_call)
+
+    updated = tick._commit_policy_result(
+        WorldState.from_dict(world),
+        result,
+        action,
+        "player_1",
+        None,
+    )
+
+    assert updated.to_dict() == WorldState.from_dict(result.updatedWorldState).to_dict()
 

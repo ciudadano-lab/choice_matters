@@ -24,7 +24,12 @@ from economy import (
     get_daily_resource_consumption,
     get_health_recovery_config,
 )
-from encounter_resolution import apply_pending_encounter, resolve_pending_encounter
+from encounter_resolution import (
+    apply_pending_encounter,
+    get_available_tactical_options,
+    get_default_tactical_option_id,
+    resolve_pending_encounter,
+)
 from settlement_tick import SettlementTick
 from world_content import load_world_content
 
@@ -215,9 +220,43 @@ class PausedRun:
         )
 
 
+def _merge_pause_decisions(
+    collected: dict[str, Any],
+    submitted: dict[str, Any],
+) -> dict[str, Any]:
+    merged = copy.deepcopy(collected)
+    for player_id, choice in submitted.items():
+        key = str(player_id)
+        if isinstance(choice, dict):
+            current = merged.get(key)
+            if not isinstance(current, dict):
+                current = {}
+            current.update(copy.deepcopy(choice))
+            merged[key] = current
+        else:
+            merged[key] = copy.deepcopy(choice)
+    return merged
+
+
+def _choice_for_pending(
+    choices: dict[str, Any],
+    encounter: PendingEncounter,
+) -> str | None:
+    choice = choices.get(encounter.player_id)
+    if isinstance(choice, dict):
+        choice = choice.get("ambient" if encounter.is_ambient else "primary")
+    return choice if isinstance(choice, str) else None
+
+
 class WorldTick:
-    def __init__(self, seed: int = 7) -> None:
+    def __init__(
+        self,
+        seed: int = 7,
+        *,
+        tactical_option_policy: str | None = None,
+    ) -> None:
         self.seed = seed
+        self.tactical_option_policy = tactical_option_policy
         self.last_period_outcome: dict[str, Any] = {}
         self.last_policy_day_outcomes: list[dict[str, Any]] = []
         self.last_period_state_hashes: list[str] = []
@@ -415,6 +454,12 @@ class WorldTick:
         *,
         room_state: dict[str, Any] | None = None,
     ) -> tuple[WorldState, PausedRun | None]:
+        """Resume a pause using per-player choices.
+
+        A string choice keyed by player id applies to both primary and ambient
+        encounters. Use {player_id: {"primary": ..., "ambient": ...}} to
+        choose separately for each pending item.
+        """
         paused = (
             PausedRun.from_dict(paused_run)
             if isinstance(paused_run, dict)
@@ -488,15 +533,18 @@ class WorldTick:
             prior_internal_events = set(paused_run.prior_internal_events)
             version = paused_run.version + 1
             run_id = paused_run.run_id
-            for choice_player_id, choice in decisions.items():
-                paused_run.decisions_collected[str(choice_player_id)] = copy.deepcopy(choice)
-            decisions = copy.deepcopy(paused_run.decisions_collected)
+            decisions = _merge_pause_decisions(
+                paused_run.decisions_collected,
+                decisions,
+            )
             world = self._resolve_pending_encounters(
                 world,
                 paused_run.pending_encounters,
                 current_slot_results,
                 decisions,
+                use_bot_policy=False,
             )
+            decisions = {}
             current_day_results.extend(current_slot_results)
             current_slot_results = []
             old_day = world.currentDay
@@ -568,6 +616,7 @@ class WorldTick:
                 pending,
                 slot_records,
                 decisions,
+                use_bot_policy=not interactive,
             )
             current_day_results.extend(slot_records)
             old_day = world.currentDay
@@ -835,7 +884,7 @@ class WorldTick:
                 location_id=target_location_id,
                 action_id=action.actionId,
             )
-        if action is not None:
+        if action is not None and action.actionType != "ambient_noise":
             _information_layer.record_action_discoveries(
                 result.updatedWorldState,
                 action_type=action.actionType,
@@ -845,7 +894,8 @@ class WorldTick:
                 outcome_tier=result.outcomeTier,
             )
         world = WorldState.from_dict(result.updatedWorldState)
-        self._apply_tactical_side_effects(world, result, actor_id, room_state)
+        if result.actionType != "ambient_noise":
+            self._apply_tactical_side_effects(world, result, actor_id, room_state)
         return world
 
     def _pending_encounter(
@@ -901,13 +951,21 @@ class WorldTick:
         pending: list[PendingEncounter],
         slot_records: list[dict[str, Any]],
         choices: dict[str, Any],
+        *,
+        use_bot_policy: bool,
     ) -> WorldState:
         for item in sorted(pending, key=lambda encounter: encounter.player_id):
-            choice = choices.get(item.player_id, "hold")
+            choice = _choice_for_pending(choices, item)
+            if choice is None:
+                choice = (
+                    self._choose_tactical_option_for_bot(item, world)
+                    if use_bot_policy
+                    else get_default_tactical_option_id()
+                )
             outcome, reason = resolve_pending_encounter(
                 item.to_dict(),
                 world,
-                chosen_option=choice if isinstance(choice, str) else None,
+                chosen_option=choice,
             )
             record = slot_records[item.record_index]
             if outcome is None:
@@ -947,6 +1005,35 @@ class WorldTick:
             }
             world.activeEvents.append(copy.deepcopy(event))
         return world
+
+    def _choose_tactical_option_for_bot(
+        self,
+        item: PendingEncounter,
+        world: WorldState,
+    ) -> str:
+        available = get_available_tactical_options(item.to_dict(), world)
+        option_ids = sorted(option["id"] for option in available)
+        if not option_ids:
+            return get_default_tactical_option_id()
+        priorities = {
+            "careful": ("hide", "flee", "barricade", "hold"),
+            "forager": ("eat", "investigate", "hide", "hold"),
+            "builder": ("barricade", "hide", "hold"),
+            "diplomat": ("investigate", "hide", "hold"),
+            "aggressive": ("ambush", "fight", "hold"),
+            "idle": ("hold",),
+        }
+        if self.tactical_option_policy == "random":
+            digest = hashlib.sha256(
+                f"{item.seed}:{item.action_id}:{item.day}:{item.time}:tactical_bot".encode(
+                    "utf-8"
+                )
+            ).digest()
+            return option_ids[int.from_bytes(digest[:8], "big") % len(option_ids)]
+        for option_id in priorities.get(self.tactical_option_policy or "", ()):
+            if option_id in option_ids:
+                return option_id
+        return get_default_tactical_option_id()
 
     @staticmethod
     def _thread_event_signature(event: dict[str, Any]) -> str:
@@ -1382,6 +1469,7 @@ class WorldTick:
         action: Any,
         *,
         seed: int | None = None,
+        chosen_option: str | None = None,
     ) -> Any:
         if not result.encounterOccurred:
             return result
@@ -1414,7 +1502,16 @@ class WorldTick:
             "stepIndex": step_index,
             "rollLog": roll_log,
         }
-        outcome, reason = resolve_pending_encounter(pending, state)
+        resolution_state = (
+            result.updatedWorldState
+            if chosen_option is not None
+            else state
+        )
+        outcome, reason = resolve_pending_encounter(
+            pending,
+            resolution_state,
+            chosen_option=chosen_option,
+        )
         if outcome is None:
             skip = {"skipped": True, "reason": reason or "resolution_skipped"}
             result.encounterOutcome = skip

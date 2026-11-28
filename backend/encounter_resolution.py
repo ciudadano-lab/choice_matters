@@ -4,7 +4,7 @@ import copy
 import hashlib
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +12,7 @@ from typing import Any
 
 from probability_config import PLAN_MODIFIER_CAP, clamp_player_stat
 from probability_engine import roll_value
+from tactical_options import TacticalOption, load_tactical_options
 
 
 _OUTCOME_ORDER = ("evaded", "close_call", "hurt", "serious")
@@ -30,9 +31,14 @@ class EncounterOutcome:
     resource_changes: dict[str, int]
     lost_item_index: int | None = None
     lost_item_name: str | None = None
+    tactic_id: str | None = None
+    tactic_costs: dict[str, Any] = field(default_factory=dict)
+    tactic_effects: list[dict[str, Any]] = field(default_factory=list)
+    tactic_action_id: str | None = None
+    tactic_location_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        outcome = {
             "outcome": self.outcome,
             "roll": round(self.roll, 6),
             "probabilities": dict(self.probabilities),
@@ -45,6 +51,12 @@ class EncounterOutcome:
                 "lost_item_name": self.lost_item_name,
             },
         }
+        if self.tactic_id is not None:
+            outcome["tacticalOption"] = {
+                "id": self.tactic_id,
+                "costs": copy.deepcopy(self.tactic_costs),
+            }
+        return outcome
 
 
 @lru_cache(maxsize=1)
@@ -148,7 +160,9 @@ def _modifier_value(
     location: dict[str, Any],
     plan_quality: float,
 ) -> float:
-    input_name = modifier["input"]
+    input_name = modifier.get("input")
+    if input_name is None:
+        return float(modifier.get("delta", 0.0))
     if input_name == "player.companion_count":
         entities = player.get("entities", {})
         companions = entities.get("companions", []) if isinstance(entities, dict) else []
@@ -159,6 +173,8 @@ def _modifier_value(
         value = plan_quality
     elif input_name == "location.dangerLevel":
         value = _numeric(location.get("dangerLevel"), 0.0)
+    elif input_name == "location.noise":
+        value = _numeric(location.get("noise"), 0.0)
     else:
         raise ValueError(f"{_CONTENT_PATH}: unsupported modifier input {input_name!r}")
 
@@ -244,6 +260,8 @@ def resolve_encounter(
     action: Any,
     chain_result: Any,
     seed: int,
+    *,
+    tactical_option: TacticalOption | None = None,
 ) -> EncounterOutcome:
     if not _triggered_encounter(chain_result):
         raise ValueError("resolve_encounter requires a triggered encounter step")
@@ -284,6 +302,22 @@ def resolve_encounter(
             "effect": "hurts" if delta > 0.0 else "helps",
             "explanation": modifier["explanation"],
         })
+    if tactical_option is not None:
+        for modifier in tactical_option.modifiers:
+            modifier_data = modifier.model_dump(mode="python")
+            delta = _modifier_value(modifier_data, player, location, quality)
+            if delta == 0.0:
+                continue
+            total_modifier += delta
+            modifiers.append({
+                "source": f"tactic:{tactical_option.id}",
+                "delta": delta,
+            })
+            reasons.append({
+                "factor": f"tactic:{tactical_option.id}",
+                "effect": "hurts" if delta > 0.0 else "helps",
+                "explanation": modifier.explanation,
+            })
 
     modifier_cap = min(
         PLAN_MODIFIER_CAP,
@@ -332,6 +366,14 @@ def resolve_encounter(
         day,
         seed,
     )
+    tactic_is_effective = tactical_option is not None and (
+        tactical_option.id != load_tactical_options().default_option
+        or bool(tactical_option.modifiers)
+        or bool(tactical_option.costs.stamina)
+        or bool(tactical_option.costs.items)
+        or bool(tactical_option.costs.noise)
+        or bool(tactical_option.follow_up_effects)
+    )
     return EncounterOutcome(
         outcome=outcome,
         roll=roll,
@@ -343,7 +385,102 @@ def resolve_encounter(
         resource_changes=effects[2],
         lost_item_index=effects[3],
         lost_item_name=effects[4],
+        tactic_id=tactical_option.id if tactic_is_effective else None,
+        tactic_costs=(
+            tactical_option.costs.model_dump(mode="json")
+            if tactic_is_effective and tactical_option is not None
+            else {}
+        ),
+        tactic_effects=(
+            [
+                effect.model_dump(mode="json", exclude_none=True)
+                for effect in tactical_option.follow_up_effects
+            ]
+            if tactic_is_effective and tactical_option is not None
+            else []
+        ),
+        tactic_action_id=(
+            str(getattr(action, "actionId", ""))
+            if tactic_is_effective
+            else None
+        ),
+        tactic_location_id=(
+            str(location.get("id"))
+            if tactic_is_effective and location.get("id") is not None
+            else None
+        ),
     )
+
+
+def get_default_tactical_option_id() -> str:
+    return load_tactical_options().default_option
+
+
+def get_available_tactical_options(
+    pending: dict[str, Any],
+    current_state: Any,
+) -> list[dict[str, Any]]:
+    world = _state_dict(current_state)
+    player = _player_from(world, str(pending.get("playerId", "")))
+    if player is None:
+        return []
+    action = SimpleNamespace(target=str(pending.get("target", "")))
+    location = _location_for(world, player, action)
+    available = []
+    for option in load_tactical_options().options:
+        if option.status != "live":
+            continue
+        requirements = option.requirements
+        required_items = set(requirements.items) | set(option.costs.items)
+        if any(not _has_tactical_item(world, player, item) for item in required_items):
+            continue
+        if _numeric(player.get("stamina"), 0.0) < option.costs.stamina:
+            continue
+        if any(
+            _numeric(player.get(stat), 0.0) < minimum
+            for stat, minimum in requirements.stat_minimums.items()
+        ):
+            continue
+        flags = location.get("flags", {})
+        if any(
+            not isinstance(flags, dict) or flags.get(flag) not in (True, 1)
+            for flag in requirements.location_flags
+        ):
+            continue
+        available.append({
+            "id": option.id,
+            "label": option.label,
+            "description": option.description,
+            "requirements": requirements.model_dump(mode="json"),
+            "costs": option.costs.model_dump(mode="json"),
+        })
+    return available
+
+
+def _has_tactical_item(
+    world: dict[str, Any],
+    player: dict[str, Any],
+    item_name: str,
+) -> bool:
+    inventory = player.get("inventory", [])
+    if isinstance(inventory, list):
+        for item in inventory:
+            name = (
+                item.get("name", item.get("id", item.get("itemId")))
+                if isinstance(item, dict)
+                else item
+            )
+            if name == item_name:
+                return True
+    resources = world.get("resources", {})
+    return isinstance(resources, dict) and _numeric(resources.get(item_name)) > 0
+
+
+def _tactical_option(option_id: str) -> TacticalOption:
+    for option in load_tactical_options().options:
+        if option.id == option_id and option.status == "live":
+            return option
+    raise ValueError(f"Unknown or unavailable tactical option {option_id!r}")
 
 
 def resolve_pending_encounter(
@@ -373,8 +510,17 @@ def resolve_pending_encounter(
         encounterOccurred=True,
         planQuality=float(pending.get("planQuality", 0.0)),
     )
-    # Tactical option effects are introduced in Stage B; Stage A preserves the choice.
-    _ = chosen_option
+    tactical_option = None
+    if chosen_option is not None:
+        tactical_option = _tactical_option(chosen_option)
+        available_ids = {
+            option["id"]
+            for option in get_available_tactical_options(pending, world)
+        }
+        if chosen_option not in available_ids:
+            raise ValueError(
+                f"Tactical option {chosen_option!r} requirements are not met"
+            )
     return (
         resolve_encounter(
             world,
@@ -382,6 +528,7 @@ def resolve_pending_encounter(
             action,
             chain_result,
             int(pending["seed"]),
+            tactical_option=tactical_option,
         ),
         None,
     )
@@ -412,6 +559,12 @@ def apply_encounter_outcome(
     if not isinstance(player, dict):
         raise ValueError(f"Encounter actor {player_id!r} is missing from the result state")
 
+    _apply_tactical_costs(
+        world,
+        player,
+        outcome.tactic_costs,
+        outcome.tactic_location_id,
+    )
     for name, delta in outcome.player_changes.items():
         player[name] = clamp_player_stat(_numeric(player.get(name), 0.0) + delta)
     if outcome.status_effect is not None:
@@ -425,7 +578,94 @@ def apply_encounter_outcome(
         resources = world.setdefault("resources", {})
         for name, delta in outcome.resource_changes.items():
             resources[name] = max(0, int(_numeric(resources.get(name))) + delta)
+    if outcome.tactic_effects:
+        from simulation_engine import SimulationEngine, StructuredAction
+
+        engine = SimulationEngine()
+        engine.apply_effect_records_to_state(
+            world,
+            StructuredAction(
+                actionId=outcome.tactic_action_id or "tactical-encounter",
+                actionType="tactical_encounter",
+                actor=player_id,
+                target=outcome.tactic_location_id or str(player.get("location", "")),
+            ),
+            outcome.tactic_effects,
+        )
     return updated
+
+
+def _apply_tactical_costs(
+    world: dict[str, Any],
+    player: dict[str, Any],
+    costs: dict[str, Any],
+    location_id: str | None,
+) -> None:
+    stamina_cost = int(costs.get("stamina", 0))
+    if stamina_cost:
+        player["stamina"] = clamp_player_stat(
+            _numeric(player.get("stamina"), 100) - stamina_cost
+        )
+    inventory = player.get("inventory", [])
+    for item_name in costs.get("items", []):
+        if isinstance(inventory, list):
+            item_index = next(
+                (
+                    index for index, item in enumerate(inventory)
+                    if (
+                        item.get("name", item.get("id", item.get("itemId")))
+                        if isinstance(item, dict)
+                        else item
+                    ) == item_name
+                ),
+                None,
+            )
+        else:
+            item_index = None
+        if item_index is not None:
+            inventory.pop(item_index)
+        else:
+            resources = world.setdefault("resources", {})
+            resources[item_name] = max(
+                0,
+                int(_numeric(resources.get(item_name))) - 1,
+            )
+    noise_cost = int(costs.get("noise", 0))
+    if location_id and noise_cost:
+        location = _location_by_id(world, location_id)
+        if location is not None:
+            maximum = load_tactical_options().max_location_noise
+            location["noise"] = min(
+                maximum,
+                max(0, int(_numeric(location.get("noise"))) + noise_cost),
+            )
+
+
+def _location_by_id(
+    world: dict[str, Any],
+    location_id: str,
+) -> dict[str, Any] | None:
+    locations = world.get("locations", [])
+    if isinstance(locations, dict):
+        location = locations.get(location_id)
+        if isinstance(location, dict):
+            return location
+        return next(
+            (
+                item for item in locations.values()
+                if isinstance(item, dict) and item.get("id") == location_id
+            ),
+            None,
+        )
+    if isinstance(locations, list):
+        return next(
+            (
+                item for item in locations
+                if isinstance(item, dict) and item.get("id") == location_id
+            ),
+            None,
+        )
+    return None
 
 
 def _player_from(world: dict[str, Any], player_id: str) -> dict[str, Any] | None:

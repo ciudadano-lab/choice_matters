@@ -1,0 +1,266 @@
+{
+  "default_option": "hold",
+  "max_location_noise": 5,
+  "options": [
+    {
+      "id": "investigate",
+      "label": "Investigate",
+      "description": "Take a brief look for useful details before reacting.",
+      "requirements": {
+        "items": [],
+        "stat_minimums": {
+          "stamina": 5
+        },
+        "location_flags": []
+      },
+      "costs": {
+        "stamina": 2,
+        "items": [],
+        "noise": 1
+      },
+      "modifiers": [
+        {
+          "id": "careful_observation",
+          "input": "player.stamina",
+          "condition": "gte",
+          "threshold": 5,
+          "delta": -0.02,
+          "explanation": "A quick assessment helps avoid the worst of the encounter."
+        }
+      ],
+      "follow_up_effects": [
+        {
+          "type": "discover_information",
+          "information": "A nearby detail may help explain the encounter."
+        }
+      ],
+      "status": "live"
+    },
+    {
+      "id": "hide",
+      "label": "Hide",
+      "description": "Stay out of sight and keep movement quiet.",
+      "requirements": {
+        "items": [],
+        "stat_minimums": {
+          "stamina": 5
+        },
+        "location_flags": []
+      },
+      "costs": {
+        "stamina": 2,
+        "items": [],
+        "noise": 0
+      },
+      "modifiers": [
+        {
+          "id": "stay_hidden",
+          "input": "player.stamina",
+          "condition": "gte",
+          "threshold": 5,
+          "delta": -0.04,
+          "explanation": "Staying out of sight makes a safer outcome more likely."
+        }
+      ],
+      "follow_up_effects": [
+        {
+          "type": "change_location_stat",
+          "target": "location",
+          "stat": "noise",
+          "amount": -1
+        }
+      ],
+      "status": "live"
+    },
+    {
+      "id": "ambush",
+      "label": "Ambush",
+      "description": "Use ammunition to strike before the threat closes in.",
+      "requirements": {
+        "items": [
+          "ammunition"
+        ],
+        "stat_minimums": {
+          "stamina": 10
+        },
+        "location_flags": [
+          "fortified"
+        ]
+      },
+      "costs": {
+        "stamina": 5,
+        "items": [
+          "ammunition"
+        ],
+        "noise": 2
+      },
+      "modifiers": [
+        {
+          "id": "ambush",
+          "input": "player.stamina",
+          "condition": "gte",
+          "threshold": 10,
+          "delta": -0.03,
+          "explanation": "A prepared first move helps limit the danger."
+        }
+      ],
+      "follow_up_effects": [],
+      "status": "live"
+    },
+    {
+      "id": "barricade",
+      "label": "Barricade",
+      "description": "Put cover between you and the threat.",
+      "requirements": {
+        "items": [
+          "building_materials"
+        ],
+        "stat_minimums": {
+          "stamina": 5
+        },
+        "location_flags": []
+      },
+      "costs": {
+        "stamina": 3,
+        "items": [
+          "building_materials"
+        ],
+        "noise": 1
+      },
+      "modifiers": [
+        {
+          "id": "take_cover",
+          "input": "player.stamina",
+          "condition": "gte",
+          "threshold": 5,
+          "delta": -0.04,
+          "explanation": "Temporary cover reduces the chance of a serious injury."
+        }
+      ],
+      "follow_up_effects": [
+        {
+          "type": "set_flag",
+          "target": "location",
+          "flag": "fortified",
+          "value": 1,
+          "duration_days": 2
+        }
+      ],
+      "status": "live"
+    },
+    {
+      "id": "flee",
+      "label": "Flee",
+      "description": "Break away from the immediate danger.",
+      "requirements": {
+        "items": [],
+        "stat_minimums": {
+          "stamina": 10
+        },
+        "location_flags": []
+      },
+      "costs": {
+        "stamina": 8,
+        "items": [],
+        "noise": 1
+      },
+      "modifiers": [
+        {
+          "id": "escape",
+          "input": "player.stamina",
+          "condition": "gte",
+          "threshold": 10,
+          "delta": -0.03,
+          "explanation": "Moving quickly helps avoid the worst consequences."
+        }
+      ],
+      "follow_up_effects": [],
+      "status": "live"
+    },
+    {
+      "id": "fight",
+      "label": "Fight",
+      "description": "Confront the threat directly.",
+      "requirements": {
+        "items": [],
+        "stat_minimums": {
+          "stamina": 10
+        },
+        "location_flags": []
+      },
+      "costs": {
+        "stamina": 8,
+        "items": [],
+        "noise": 2
+      },
+      "modifiers": [
+        {
+          "id": "direct_fight",
+          "input": "player.stamina",
+          "condition": "gte",
+          "threshold": 10,
+          "delta": 0.03,
+          "explanation": "A direct confrontation increases the chance of being hurt."
+        }
+      ],
+      "follow_up_effects": [],
+      "status": "live"
+    },
+    {
+      "id": "eat",
+      "label": "Eat",
+      "description": "Use food to steady yourself during the encounter.",
+      "requirements": {
+        "items": [
+          "food"
+        ],
+        "stat_minimums": {},
+        "location_flags": []
+      },
+      "costs": {
+        "stamina": 0,
+        "items": [
+          "food"
+        ],
+        "noise": 0
+      },
+      "modifiers": [
+        {
+          "id": "steady_breath",
+          "input": "player.hunger",
+          "condition": "gte",
+          "threshold": 1,
+          "delta": -0.01,
+          "explanation": "Eating helps maintain composure under pressure."
+        }
+      ],
+      "follow_up_effects": [
+        {
+          "type": "change_stat",
+          "target": "actor",
+          "stat": "hunger",
+          "amount": -10
+        }
+      ],
+      "status": "live"
+    },
+    {
+      "id": "hold",
+      "label": "Hold",
+      "description": "Wait and react cautiously.",
+      "requirements": {
+        "items": [],
+        "stat_minimums": {},
+        "location_flags": []
+      },
+      "costs": {
+        "stamina": 0,
+        "items": [],
+        "noise": 0
+      },
+      "modifiers": [],
+      "follow_up_effects": [],
+      "status": "live"
+    }
+  ]
+}

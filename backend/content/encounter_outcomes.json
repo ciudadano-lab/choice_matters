@@ -50,6 +50,13 @@
       "per_unit": 0.01,
       "max_units": 5,
       "explanation": "Dangerous locations make encounters more hazardous."
+    },
+    {
+      "id": "location_noise",
+      "input": "location.noise",
+      "per_unit": 0.01,
+      "max_units": 5,
+      "explanation": "Recent noise makes encounters more hazardous."
     }
   ],
   "effects": {

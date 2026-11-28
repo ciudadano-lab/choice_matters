@@ -332,7 +332,7 @@ def _run_game(payload: dict[str, Any]) -> dict[str, Any]:
     if lite:
         world.get("cityLayout", {}).pop("roadNetwork", None)
 
-    tick = WorldTick(seed=seed)
+    tick = WorldTick(seed=seed, tactical_option_policy=bot)
     library = get_library()
     random_source = random.Random(seed)
     player_ids = [str(player["id"]) for player in world["players"]]
