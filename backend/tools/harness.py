@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 import csv
+import hashlib
 import json
 import math
 import multiprocessing
@@ -41,6 +42,8 @@ EARLY_DEATH_RATE_MAX = 0.05
 ORIGINAL_BOT_NAMES = ("careful", "forager", "builder", "diplomat", "aggressive", "random")
 PLAN_VARIANT_BOTS = ("careful_planned", "careful_sloppy")
 BOT_NAMES = ORIGINAL_BOT_NAMES + PLAN_VARIANT_BOTS + ("idle",)
+WORLD_SIM_SCENARIOS = ("baseline", "depleted_stores", "mild_shortage", "high_unrest")
+FACTION_STANCES = ("allied", "friendly", "neutral", "wary", "hostile", "war")
 WINDOW_DAYS = 10
 PLAYER_STATS = ("health", "stamina", "stress", "hunger", "thirst")
 DEATH_CAUSES = ("starvation", "dehydration", "combat/injury", "other")
@@ -832,10 +835,141 @@ def run_play(
     return report, rows
 
 
-def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[str, Any]:
+def _world_state_sha256(world: WorldState) -> str:
+    canonical = json.dumps(
+        world.to_dict(),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _at_bound(value: Any, lower: int, upper: int) -> bool:
+    if isinstance(value, bool):
+        return False
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return False
+    return numeric <= lower or numeric >= upper
+
+
+def _acceptance_snapshot(
+    world: WorldState,
+    *,
+    elapsed_day: int,
+    retention_caps: dict[str, int],
+) -> dict[str, Any]:
+    settlements = [
+        {
+            "id": str(settlement.get("id", settlement.get("location_id", ""))),
+            "status": str(settlement.get("status", "unknown")),
+            "population": int(settlement.get("population", 0)),
+            "morale": settlement.get("morale"),
+            "unrest": settlement.get("unrest"),
+            "defense": settlement.get("defense"),
+        }
+        for settlement in world.settlements
+        if isinstance(settlement, dict)
+    ]
+    stance_distribution = {stance: 0 for stance in FACTION_STANCES}
+    for faction in world.factions:
+        if not isinstance(faction, dict):
+            continue
+        stances = faction.get("stances", {})
+        if not isinstance(stances, dict):
+            continue
+        for stance in stances.values():
+            if stance in stance_distribution:
+                stance_distribution[stance] += 1
+
+    bound_observations = {
+        "settlement_morale": {"at_bound": 0, "total": 0},
+        "settlement_unrest": {"at_bound": 0, "total": 0},
+        "settlement_defense": {"at_bound": 0, "total": 0},
+        "faction_dispositions": {"at_bound": 0, "total": 0},
+    }
+    for settlement in world.settlements:
+        if not isinstance(settlement, dict):
+            continue
+        for field, key in (
+            ("morale", "settlement_morale"),
+            ("unrest", "settlement_unrest"),
+            ("defense", "settlement_defense"),
+        ):
+            value = settlement.get(field)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                counts = bound_observations[key]
+                counts["total"] += 1
+                counts["at_bound"] += int(_at_bound(value, 0, 100))
+
+    for faction in world.factions:
+        if not isinstance(faction, dict):
+            continue
+        for field in ("relationships", "player_dispositions"):
+            dispositions = faction.get(field, {})
+            if not isinstance(dispositions, dict):
+                continue
+            for value in dispositions.values():
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    counts = bound_observations["faction_dispositions"]
+                    counts["total"] += 1
+                    counts["at_bound"] += int(_at_bound(value, -100, 100))
+
+    current_day = world.currentDay
+
+    def count_day_events(events: list[dict[str, Any]], *day_fields: str) -> int:
+        total = 0
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            event_day = next(
+                (event[field] for field in day_fields if field in event),
+                None,
+            )
+            if event_day == current_day or str(event_day) == str(current_day):
+                total += 1
+        return total
+
+    active_count = count_day_events(world.activeEvents, "day", "timestamp")
+    internal_count = count_day_events(world.internalEvents, "day", "timestamp")
+    history_count = count_day_events(world.worldHistory, "day", "timestamp")
+    retention_lengths = {
+        "active_events": len(world.activeEvents),
+        "world_history": len(world.worldHistory),
+        "internal_events": len(world.internalEvents),
+        "relationships": len(world.relationships),
+    }
+    return {
+        "elapsed_day": elapsed_day,
+        "settlements": settlements,
+        "stance_distribution": stance_distribution,
+        "bound_observations": bound_observations,
+        "event_volume": active_count + internal_count + history_count,
+        "event_log_counts": {
+            "active_events": active_count,
+            "internal_events": internal_count,
+            "world_history": history_count,
+        },
+        "retention_lengths": retention_lengths,
+        "retention_caps": dict(retention_caps),
+        "state_hash": _world_state_sha256(world),
+    }
+
+
+def run_world_sim(
+    *,
+    days: int,
+    seeds: int,
+    scenario: str = "baseline",
+    _acceptance_metrics: bool = False,
+    _check_determinism: bool = True,
+) -> dict[str, Any]:
     if days <= 0 or seeds <= 0:
         raise ValueError("days and seeds must be positive")
-    if scenario not in {"baseline", "depleted_stores", "mild_shortage", "high_unrest"}:
+    if scenario not in WORLD_SIM_SCENARIOS:
         raise ValueError(f"Unknown world_sim scenario: {scenario}")
 
     runs: list[dict[str, Any]] = []
@@ -843,6 +977,12 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
         world = generate_initial_world_state([], seed)
         world.players = []
         faction_rules = load_world_content().faction_rules
+        retention_caps = {
+            "active_events": faction_rules.retention.active_events,
+            "world_history": faction_rules.retention.world_history,
+            "internal_events": faction_rules.retention.internal_events,
+            "relationships": faction_rules.retention.relationships,
+        }
         influence_factions = sorted(
             (item for item in world.factions if isinstance(item, dict)),
             key=lambda item: str(item.get("id", "")),
@@ -914,7 +1054,7 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
                 "attention_pressure",
             )
         }
-        for _ in range(days):
+        for elapsed_day in range(1, days + 1):
             world = tick.advance(
                 world,
                 WorldEventQueue(),
@@ -949,7 +1089,7 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
                 for settlement in settlements
                 for resource in settlement.get("stores", {})
             })
-            daily.append({
+            snapshot = {
                 "day": world.currentDay,
                 "faction_count": len(world.factions),
                 "action_distribution": {
@@ -988,7 +1128,16 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
                     )
                     for resource in resources
                 },
-            })
+            }
+            if _acceptance_metrics:
+                snapshot.update(
+                    _acceptance_snapshot(
+                        world,
+                        elapsed_day=elapsed_day,
+                        retention_caps=retention_caps,
+                    )
+                )
+            daily.append(snapshot)
         runs.append({
             "seed": seed,
             "daily": daily,
@@ -1033,7 +1182,7 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
         for day in (30, 60, 100)
         if days >= day
     }
-    return {
+    report = {
         "configuration": {"days": days, "seeds": seeds, "scenario": scenario},
         "runs": runs,
         "summary": {
@@ -1094,16 +1243,60 @@ def run_world_sim(*, days: int, seeds: int, scenario: str = "baseline") -> dict[
             },
         },
     }
+    if _acceptance_metrics and _check_determinism:
+        replay = run_world_sim(
+            days=days,
+            seeds=min(2, seeds),
+            scenario=scenario,
+            _acceptance_metrics=True,
+            _check_determinism=False,
+        )
+        matched_days = 0
+        checked_days = 0
+        hash_comparisons: dict[str, list[dict[str, Any]]] = {}
+        replay_by_seed = {run["seed"]: run for run in replay["runs"]}
+        for original in runs[:2]:
+            repeated = replay_by_seed.get(original["seed"])
+            if repeated is None:
+                continue
+            comparisons = []
+            for first_day, repeated_day in zip(original["daily"], repeated["daily"]):
+                first_hash = first_day["state_hash"]
+                repeated_hash = repeated_day["state_hash"]
+                checked_days += 1
+                is_match = first_hash == repeated_hash
+                matched_days += int(is_match)
+                comparisons.append({
+                    "elapsed_day": first_day["elapsed_day"],
+                    "first_run": first_hash,
+                    "repeat_run": repeated_hash,
+                    "match": is_match,
+                })
+            hash_comparisons[str(original["seed"])] = comparisons
+        report["summary"]["determinism"] = {
+            "seeds_checked": sorted(int(seed) for seed in hash_comparisons),
+            "days_checked": checked_days,
+            "matching_days": matched_days,
+            "identical_histories": checked_days > 0 and matched_days == checked_days,
+            "state_hashes_by_seed": hash_comparisons,
+        }
+    return report
 
 
 def run_world_sim_scenarios(
     *,
     days: int,
     seeds: int,
+    _acceptance_metrics: bool = False,
 ) -> dict[str, Any]:
     reports = {
-        scenario: run_world_sim(days=days, seeds=seeds, scenario=scenario)
-        for scenario in ("baseline", "depleted_stores", "mild_shortage", "high_unrest")
+        scenario: run_world_sim(
+            days=days,
+            seeds=seeds,
+            scenario=scenario,
+            _acceptance_metrics=_acceptance_metrics,
+        )
+        for scenario in WORLD_SIM_SCENARIOS
     }
     return {
         "configuration": {"days": days, "seeds": seeds},
@@ -1113,6 +1306,263 @@ def run_world_sim_scenarios(
         },
         "reports": reports,
     }
+
+
+def _world_sim_acceptance_rows(
+    scenarios: dict[str, dict[str, Any]],
+    *,
+    days: int,
+    retention_caps: dict[str, int],
+    event_cap_per_day: int,
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+
+    def add_row(
+        scenario: str,
+        target: str,
+        observed: str,
+        criterion: str,
+        status: str,
+    ) -> None:
+        rows.append({
+            "scenario": scenario,
+            "target": target,
+            "observed": observed,
+            "criterion": criterion,
+            "status": status,
+        })
+
+    for scenario in WORLD_SIM_SCENARIOS:
+        report = scenarios[scenario]
+        runs = report["runs"]
+        day_100_runs = [
+            (run, next(
+                (
+                    snapshot for snapshot in run["daily"]
+                    if snapshot.get("elapsed_day") == 100
+                ),
+                None,
+            ))
+            for run in runs
+        ]
+        completed_day_100 = [(run, snapshot) for run, snapshot in day_100_runs if snapshot]
+        if completed_day_100:
+            alive_seeds = sum(
+                any(
+                    settlement["population"] > 0
+                    and settlement["status"] != "abandoned"
+                    for settlement in snapshot["settlements"]
+                )
+                for _, snapshot in completed_day_100
+            )
+            alive_rate = alive_seeds / len(completed_day_100)
+            alive_observed = f"{alive_seeds}/{len(completed_day_100)} seeds ({alive_rate:.1%})"
+            alive_status = "PASS" if alive_rate > 0.5 else "WARN"
+        else:
+            alive_observed = "not reached"
+            alive_status = "WARN"
+        add_row(
+            scenario,
+            "Settlement alive at day 100",
+            alive_observed,
+            "Most seeds (>50%) retain at least one populated, non-abandoned settlement",
+            alive_status,
+        )
+
+        collapsed = 0
+        settlement_total = 0
+        for run in runs:
+            first_snapshot = run["daily"][0] if run["daily"] else None
+            if first_snapshot is None:
+                continue
+            initial_ids = {
+                settlement["id"]
+                for settlement in first_snapshot["settlements"]
+            }
+            settlement_total += len(initial_ids)
+            failed_ids = {
+                settlement["id"]
+                for snapshot in run["daily"]
+                if snapshot.get("elapsed_day", days + 1) < 40
+                for settlement in snapshot["settlements"]
+                if settlement["id"] in initial_ids
+                and settlement["status"] in {"collapsing", "abandoned"}
+            }
+            collapsed += len(failed_ids)
+        early_collapse_rate = collapsed / settlement_total if settlement_total else 0.0
+        add_row(
+            scenario,
+            "Settlements collapsing/abandoned before day 40",
+            f"{collapsed}/{settlement_total} settlements ({early_collapse_rate:.1%})",
+            "Rare: <=10% of settlements",
+            "PASS" if early_collapse_rate <= 0.10 else "WARN",
+        )
+
+        for checkpoint_day in (30, 60, 100):
+            if checkpoint_day > days:
+                continue
+            stance_counts = {stance: 0 for stance in FACTION_STANCES}
+            for run in runs:
+                snapshot = next(
+                    (
+                        item for item in run["daily"]
+                        if item.get("elapsed_day") == checkpoint_day
+                    ),
+                    None,
+                )
+                if snapshot is None:
+                    continue
+                for stance, count in snapshot["stance_distribution"].items():
+                    stance_counts[stance] += count
+            active_stances = sum(count > 0 for count in stance_counts.values())
+            stance_display = ", ".join(
+                f"{stance}={stance_counts[stance]}"
+                for stance in FACTION_STANCES
+            )
+            add_row(
+                scenario,
+                f"Faction stances at day {checkpoint_day}",
+                f"{stance_display}; distinct={active_stances}",
+                "More than one stance represented",
+                "PASS" if active_stances > 1 else "WARN",
+            )
+
+        bound_totals = {
+            stat: {"at_bound": 0, "total": 0}
+            for stat in (
+                "settlement_morale",
+                "settlement_unrest",
+                "settlement_defense",
+                "faction_dispositions",
+            )
+        }
+        event_volumes: list[int] = []
+        cap_hits = {key: 0 for key in retention_caps}
+        tick_observations = 0
+        for run in runs:
+            for snapshot in run["daily"]:
+                tick_observations += 1
+                event_volumes.append(snapshot["event_volume"])
+                for stat, counts in snapshot["bound_observations"].items():
+                    bound_totals[stat]["at_bound"] += counts["at_bound"]
+                    bound_totals[stat]["total"] += counts["total"]
+                for collection, cap in retention_caps.items():
+                    if snapshot["retention_lengths"][collection] >= cap:
+                        cap_hits[collection] += 1
+
+        for stat, counts in bound_totals.items():
+            rate = counts["at_bound"] / counts["total"] if counts["total"] else 0.0
+            add_row(
+                scenario,
+                f"Pinned stat: {stat}",
+                f"{counts['at_bound']}/{counts['total']} observations ({rate:.1%})",
+                "WARN above 50% of entity-ticks at a bound",
+                "WARN" if rate > 0.5 else "PASS",
+            )
+
+        maximum_events = max(event_volumes, default=0)
+        mean_events = _mean(event_volumes)
+        add_row(
+            scenario,
+            "Events per tick (active + internal + history)",
+            f"max={maximum_events}; mean={mean_events:.2f}",
+            f"Maximum <= configured settlement event cap ({event_cap_per_day}/day)",
+            "PASS" if maximum_events <= event_cap_per_day else "WARN",
+        )
+        for collection, cap in retention_caps.items():
+            hit_rate = cap_hits[collection] / tick_observations if tick_observations else 0.0
+            add_row(
+                scenario,
+                f"Retention cap: {collection}",
+                f"cap={cap}; hit={cap_hits[collection]}/{tick_observations} ticks ({hit_rate:.1%})",
+                "WARN if the cap is hit on >50% of ticks",
+                "WARN" if hit_rate > 0.5 else "PASS",
+            )
+
+        determinism = report["summary"].get("determinism", {})
+        checked = determinism.get("days_checked", 0)
+        matching = determinism.get("matching_days", 0)
+        deterministic = determinism.get("identical_histories", False)
+        add_row(
+            scenario,
+            "Determinism: two seeds replayed",
+            f"{matching}/{checked} daily state hashes match",
+            "All per-day hashes match for both replayed seeds",
+            "PASS" if deterministic else "WARN",
+        )
+
+    return rows
+
+
+def run_world_sim_acceptance(*, days: int = 100, seeds: int = 30) -> dict[str, Any]:
+    scenarios = run_world_sim_scenarios(
+        days=days,
+        seeds=seeds,
+        _acceptance_metrics=True,
+    )
+    faction_rules = load_world_content().faction_rules
+    retention_caps = {
+        "active_events": faction_rules.retention.active_events,
+        "world_history": faction_rules.retention.world_history,
+        "internal_events": faction_rules.retention.internal_events,
+        "relationships": faction_rules.retention.relationships,
+    }
+    event_cap_per_day = load_world_content().settlements.defaults.max_events_per_day
+    return {
+        "configuration": {
+            "days": days,
+            "seeds": seeds,
+            "scenarios": list(WORLD_SIM_SCENARIOS),
+        },
+        "measurement_notes": {
+            "event_volume": "New entries for the current tick in activeEvents, internalEvents, and worldHistory.",
+            "faction_dispositions": "Both faction-to-faction relationships and faction-to-player dispositions.",
+            "settlement_alive": "Population > 0 and status is not abandoned.",
+            "early_collapse": "Each initial settlement is counted once if it reaches collapsing or abandoned before elapsed day 40.",
+            "determinism": "Canonical SHA-256 of the full world state after each tick; seeds 1 and 2 are replayed once.",
+        },
+        "retention_caps": retention_caps,
+        "event_cap_per_day": event_cap_per_day,
+        "summary_table": _world_sim_acceptance_rows(
+            scenarios["reports"],
+            days=days,
+            retention_caps=retention_caps,
+            event_cap_per_day=event_cap_per_day,
+        ),
+        "scenarios": scenarios["reports"],
+    }
+
+
+def _write_world_sim_acceptance(out_dir: Path, report: dict[str, Any]) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    table_path = out_dir / "world_sim_acceptance.csv"
+    fields = ("scenario", "target", "observed", "criterion", "status")
+    with table_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(report["summary_table"])
+    with (out_dir / "world_sim_acceptance.json").open(
+        "w",
+        encoding="utf-8",
+        newline="\n",
+    ) as handle:
+        json.dump(report, handle, indent=2, sort_keys=True, allow_nan=False)
+        handle.write("\n")
+
+
+def _print_world_sim_acceptance(report: dict[str, Any]) -> None:
+    config = report["configuration"]
+    print(
+        f"World_sim acceptance: {config['days']} days x {config['seeds']} seeds "
+        f"per scenario"
+    )
+    print(f"{'SCENARIO':<18} | {'TARGET':<44} | {'OBSERVED':<76} | STATUS")
+    print("-" * 155)
+    for row in report["summary_table"]:
+        print(
+            f"{row['scenario']:<18} | {row['target']:<44} | "
+            f"{row['observed']:<76} | {row['status']}"
+        )
 
 
 def _write_world_sim_report(out_dir: Path, report: dict[str, Any]) -> None:
@@ -1767,6 +2217,11 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=_default_out() / "world_sim",
     )
+    world_sim.add_argument(
+        "--acceptance",
+        action="store_true",
+        help="Run the PASS/WARN acceptance report across all world_sim scenarios.",
+    )
     return parser
 
 
@@ -1791,6 +2246,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "world_sim":
         if args.days <= 0 or args.seeds <= 0:
             parser.error("--days and --seeds must be positive")
+        if args.acceptance:
+            if args.scenario != "all":
+                parser.error("--acceptance always includes all world_sim scenarios")
+            report = run_world_sim_acceptance(days=args.days, seeds=args.seeds)
+            _write_world_sim_acceptance(args.out, report)
+            _print_world_sim_acceptance(report)
+            print(f"Wrote {args.out / 'world_sim_acceptance.csv'}")
+            print(f"Wrote {args.out / 'world_sim_acceptance.json'}")
+            return 0
         if args.scenario == "all":
             report = run_world_sim_scenarios(days=args.days, seeds=args.seeds)
             args.out.mkdir(parents=True, exist_ok=True)

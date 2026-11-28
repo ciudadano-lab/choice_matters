@@ -19,10 +19,12 @@ from tools.harness import (
     _print_play_report,
     _run_game,
     _write_play_outputs,
+    _write_world_sim_acceptance,
     build_sweep_rows,
     build_plan_sweep_rows,
     run_play,
     run_world_sim,
+    run_world_sim_acceptance,
     run_world_sim_scenarios,
 )
 
@@ -183,6 +185,36 @@ def test_world_sim_scenarios_report_depleted_and_high_unrest_paths():
         sum(statuses.values()) == 6
         for statuses in report["scenarios"].values()
     )
+
+
+def test_world_sim_acceptance_report_builds_and_saves_pass_warn_table(tmp_path):
+    report = run_world_sim_acceptance(days=2, seeds=2)
+
+    assert set(report["scenarios"]) == {
+        "baseline",
+        "depleted_stores",
+        "mild_shortage",
+        "high_unrest",
+    }
+    assert report["configuration"] == {
+        "days": 2,
+        "seeds": 2,
+        "scenarios": [
+            "baseline",
+            "depleted_stores",
+            "mild_shortage",
+            "high_unrest",
+        ],
+    }
+    assert report["summary_table"]
+    assert all(row["status"] in {"PASS", "WARN"} for row in report["summary_table"])
+
+    _write_world_sim_acceptance(tmp_path, report)
+    assert (tmp_path / "world_sim_acceptance.csv").is_file()
+    assert (tmp_path / "world_sim_acceptance.json").is_file()
+    assert "scenario,target,observed,criterion,status" in (
+        tmp_path / "world_sim_acceptance.csv"
+    ).read_text(encoding="utf-8")
 
 
 def test_encounter_outcome_target_checks_report_prepared_and_unprepared_bands(capsys):
