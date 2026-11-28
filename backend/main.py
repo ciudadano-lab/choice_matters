@@ -64,6 +64,14 @@ def _apply_live_action(
 ) -> Any:
     result = engine.apply(world_state, action, rules="current")
     WorldTick(seed=engine.seed).apply_faction_relationship_changes(result, action)
+    InformationLayer().record_action_discoveries(
+        result.updatedWorldState,
+        action_type=action.actionType,
+        actor_id=action.actor,
+        target=action.target,
+        parameters=action.parameters,
+        outcome_tier=result.outcomeTier,
+    )
     return result
 
 

@@ -187,6 +187,28 @@ class FactionDecisionRules(StrictContentModel):
     goal_action_targets: dict[str, str] = Field(default_factory=dict)
 
 
+DiscoveryLevel = Literal["heard_of", "met", "known"]
+
+
+class DiscoveryRules(StrictContentModel):
+    initial_faction_level: DiscoveryLevel = "known"
+    initial_settlement_level: DiscoveryLevel = "met"
+    founded_settlement_level: DiscoveryLevel = "known"
+    travel_settlement_level: DiscoveryLevel = "met"
+    search_settlement_level: DiscoveryLevel = "met"
+    presence_settlement_level: DiscoveryLevel = "known"
+    interaction_first_level: DiscoveryLevel = "met"
+    interaction_repeat_level: DiscoveryLevel = "known"
+    interaction_success_level: DiscoveryLevel = "known"
+    interaction_repeat_count: StrictInt = Field(gt=1, default=2)
+    report_level: DiscoveryLevel = "heard_of"
+    report_sources: tuple[Literal["rumor", "radio_report", "survivor_report"], ...] = (
+        "rumor",
+        "radio_report",
+        "survivor_report",
+    )
+
+
 class FactionRules(StrictContentModel):
     goal_vocabulary: tuple[str, ...]
     faction_disposition_scale_factor: StrictInt = Field(gt=0, default=5)
@@ -199,6 +221,7 @@ class FactionRules(StrictContentModel):
     max_factions: StrictInt = Field(gt=0)
     splinter: SplinterRules
     decisions: FactionDecisionRules
+    discovery: DiscoveryRules = Field(default_factory=DiscoveryRules)
 
 
 class WorldContent(StrictContentModel):

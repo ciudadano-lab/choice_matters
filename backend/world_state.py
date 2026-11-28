@@ -1261,6 +1261,9 @@ def generate_initial_world_state(players: list[dict[str, Any]], seed: int) -> Wo
             if isinstance(player, dict) and player.get("id") is not None
         }
     world.resources = get_starting_resources(len(world.players))
+    from information_layer import InformationLayer
+
+    InformationLayer().initialize_player_discoveries(world)
     world.refresh_layers()
     return world
 

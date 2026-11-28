@@ -270,6 +270,15 @@ class WorldTick:
                         location_id=target_location_id,
                         action_id=action.actionId,
                     )
+                if action is not None:
+                    _information_layer.record_action_discoveries(
+                        result.updatedWorldState,
+                        action_type=action.actionType,
+                        actor_id=actor_id,
+                        target=action.target,
+                        parameters=action.parameters,
+                        outcome_tier=result.outcomeTier,
+                    )
                 world = WorldState.from_dict(result.updatedWorldState)
                 self._apply_tactical_side_effects(world, result, actor_id, room_state)
                 self.last_policy_day_outcomes.append(

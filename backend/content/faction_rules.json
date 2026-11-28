@@ -28,6 +28,20 @@
     "minimum_parent_remaining_territory": 1,
     "minimum_splinter_territory": 1
   },
+  "discovery": {
+    "initial_faction_level": "known",
+    "initial_settlement_level": "met",
+    "founded_settlement_level": "known",
+    "travel_settlement_level": "met",
+    "search_settlement_level": "met",
+    "presence_settlement_level": "known",
+    "interaction_first_level": "met",
+    "interaction_repeat_level": "known",
+    "interaction_success_level": "known",
+    "interaction_repeat_count": 2,
+    "report_level": "heard_of",
+    "report_sources": ["rumor", "radio_report", "survivor_report"]
+  },
   "decisions": {
     "interval_days": 7,
     "base_scores": {

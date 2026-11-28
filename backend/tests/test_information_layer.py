@@ -382,3 +382,151 @@ def test_client_state_projects_only_recipient_discoveries():
     assert visible_to_b["settlements"][0]["id"] == "hidden_settlement"
     assert "goals" not in visible_to_b["factions"][0]
     assert "resources" not in visible_to_b["factions"][0]
+
+
+def test_fresh_client_state_includes_players_faction_and_nearest_settlement():
+    from main import build_client_state
+
+    world = generate_initial_world_state(
+        [{"id": "player_1", "name": "Player 1", "location": "Unknown Shelter"}],
+        seed=17,
+    )
+    client_world = build_client_state(
+        {"players": {"1": {}}, "world_state": world.to_dict()},
+        1,
+    )["world_state"]
+
+    assert any(item["id"] == "faction_survivors" for item in client_world["factions"])
+    player_discoveries = world.playerKnownWorld["players"]["player_1"]["settlements"]
+    nearest_settlement = min(
+        world.settlements,
+        key=lambda item: (
+            0 if item["location_id"] == world.players[0]["spawnLocationId"] else
+            (
+                (item["coordinates"]["x"] - world.players[0]["spawnCoordinates"]["x"]) ** 2
+                + (item["coordinates"]["y"] - world.players[0]["spawnCoordinates"]["y"]) ** 2
+            ),
+            item["id"],
+        ),
+    )
+    assert player_discoveries[nearest_settlement["id"]] == "met"
+    assert any(item["id"] == nearest_settlement["id"] for item in client_world["settlements"])
+
+
+def test_live_founding_discovery_projects_map_fields_to_founder():
+    from main import _apply_live_action, build_client_state
+    from simulation_engine import SimulationEngine, StructuredAction
+
+    world = generate_initial_world_state(
+        [{"id": "player_1", "name": "Player 1", "location": "Unknown Shelter"}],
+        seed=29,
+    )
+    occupied = {item["location_id"] for item in world.settlements}
+    target = next(item for item in world.locations if item["id"] not in occupied)
+    action = StructuredAction(
+        actionId="player-founded-settlement",
+        actionType="establish_settlement",
+        actor="player_1",
+        target=target["id"],
+        parameters={},
+        timeCost=3,
+    )
+
+    result = _apply_live_action(SimulationEngine(seed=29), world, action)
+    client_world = build_client_state(
+        {"players": {"1": {}}, "world_state": result.updatedWorldState},
+        1,
+    )["world_state"]
+    founded = next(
+        item for item in client_world["settlements"]
+        if item["id"] == "player-founded-settlement"
+    )
+
+    assert founded["discoveryLevel"] == "known"
+    assert founded["location"] == target["id"]
+    assert founded["tier"] == 1
+    assert founded["coordinates"] == target["coordinates"]
+
+
+def test_interactions_and_reports_record_monotonic_entity_discoveries():
+    world = WorldState.from_dict({
+        "players": [{"id": "player_1", "location": "camp"}],
+        "locations": [{"id": "camp", "name": "Camp"}],
+        "factions": [{"id": "faction_test", "name": "Test Faction"}],
+        "settlements": [{
+            "id": "settlement_test",
+            "name": "Test Settlement",
+            "location_id": "camp",
+            "faction_id": "faction_test",
+            "population": 10,
+        }],
+    })
+    layer = InformationLayer()
+
+    layer.record_action_discoveries(
+        world,
+        action_type="communicate",
+        actor_id="player_1",
+        target="faction_test",
+        outcome_tier="partial_success",
+    )
+    assert world.playerKnownWorld["players"]["player_1"]["factions"]["faction_test"] == "met"
+    layer.record_action_discoveries(
+        world,
+        action_type="communicate",
+        actor_id="player_1",
+        target="faction_test",
+        outcome_tier="failure",
+    )
+    assert world.playerKnownWorld["players"]["player_1"]["factions"]["faction_test"] == "known"
+
+    for source in ("rumor", "radio_report", "survivor_report"):
+        layer.apply_information(
+            world,
+            {
+                "player_id": "player_1",
+                "source": source,
+                "factionIds": ["faction_test"],
+                "settlementIds": ["settlement_test"],
+                "content": "A report mentions Test Settlement.",
+            },
+            target_location="not-a-location",
+        )
+    assert world.playerKnownWorld["players"]["player_1"]["settlements"]["settlement_test"] == "heard_of"
+    layer.discover_settlement(
+        world,
+        player_id="player_1",
+        settlement_id="settlement_test",
+        level="met",
+    )
+    assert world.playerKnownWorld["players"]["player_1"]["settlements"]["settlement_test"] == "met"
+
+
+def test_location_actions_progress_settlement_discovery():
+    world = WorldState.from_dict({
+        "players": [{"id": "player_1", "location": "camp"}],
+        "locations": [{"id": "camp", "name": "Camp"}],
+        "factions": [],
+        "settlements": [{
+            "id": "settlement_test",
+            "name": "Test Settlement",
+            "location_id": "camp",
+            "population": 10,
+        }],
+    })
+    layer = InformationLayer()
+
+    layer.record_action_discoveries(
+        world,
+        action_type="search",
+        actor_id="player_1",
+        target="camp",
+    )
+    assert world.playerKnownWorld["players"]["player_1"]["settlements"]["settlement_test"] == "met"
+    layer.record_action_discoveries(
+        world,
+        action_type="rest",
+        actor_id="player_1",
+        target="camp",
+    )
+    assert world.playerKnownWorld["players"]["player_1"]["settlements"]["settlement_test"] == "known"
