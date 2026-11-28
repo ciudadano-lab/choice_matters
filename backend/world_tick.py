@@ -24,7 +24,7 @@ from economy import (
     get_daily_resource_consumption,
     get_health_recovery_config,
 )
-from encounter_resolution import apply_encounter_outcome, resolve_encounter
+from encounter_resolution import apply_pending_encounter, resolve_pending_encounter
 from settlement_tick import SettlementTick
 from world_content import load_world_content
 
@@ -58,12 +58,169 @@ class WorldEventQueue:
     def has_pending_events(self) -> bool:
         return bool(self._events)
 
+    def to_list(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "day": event.day,
+                "summary": event.summary,
+                "event_type": event.event_type,
+                "payload": copy.deepcopy(event.payload),
+            }
+            for event in self._events
+        ]
+
+    def replace_events(self, events: list[dict[str, Any]]) -> None:
+        self._events = [
+            WorldEvent(
+                day=int(event["day"]),
+                summary=str(event["summary"]),
+                event_type=str(event["event_type"]),
+                payload=copy.deepcopy(event.get("payload", {})),
+            )
+            for event in events
+        ]
+        self._events.sort(key=lambda item: (item.day, item.summary))
+
+
+@dataclass
+class PendingEncounter:
+    player_id: str
+    action_id: str
+    action_type: str
+    target: str
+    parameters: dict[str, Any]
+    day: int
+    time: str
+    seed: int
+    plan_quality: float
+    encounter_step: str
+    step_index: int
+    roll_log: list[dict[str, Any]]
+    is_ambient: bool
+    outcome_tier: str
+    record_index: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "playerId": self.player_id,
+            "actionId": self.action_id,
+            "actionType": self.action_type,
+            "target": self.target,
+            "parameters": copy.deepcopy(self.parameters),
+            "day": self.day,
+            "time": self.time,
+            "seed": self.seed,
+            "planQuality": self.plan_quality,
+            "encounterStep": self.encounter_step,
+            "stepIndex": self.step_index,
+            "rollLog": copy.deepcopy(self.roll_log),
+            "isAmbient": self.is_ambient,
+            "outcomeTier": self.outcome_tier,
+            "recordIndex": self.record_index,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PendingEncounter:
+        return cls(
+            player_id=str(data["playerId"]),
+            action_id=str(data["actionId"]),
+            action_type=str(data["actionType"]),
+            target=str(data.get("target", "")),
+            parameters=copy.deepcopy(data.get("parameters", {})),
+            day=int(data["day"]),
+            time=str(data["time"]),
+            seed=int(data["seed"]),
+            plan_quality=float(data.get("planQuality", 0.0)),
+            encounter_step=str(data["encounterStep"]),
+            step_index=int(data["stepIndex"]),
+            roll_log=copy.deepcopy(data.get("rollLog", [])),
+            is_ambient=bool(data.get("isAmbient", False)),
+            outcome_tier=str(data.get("outcomeTier", "success")),
+            record_index=int(data["recordIndex"]),
+        )
+
+
+@dataclass
+class PausedRun:
+    run_id: str
+    day: int
+    slot: str
+    resume_cursor: str
+    pending_encounters: list[PendingEncounter]
+    period_days: int
+    remaining_days: int
+    days_resolved: int
+    decisions_collected: dict[str, Any]
+    version: int
+    per_day_results: list[dict[str, Any]]
+    current_day_results: list[dict[str, Any]]
+    current_slot_results: list[dict[str, Any]]
+    period_summary_inputs: list[dict[str, Any]]
+    queued_events: list[dict[str, Any]]
+    prior_active_events: list[str]
+    prior_internal_events: list[str]
+    daily_state_hashes: list[str]
+    seed: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "runId": self.run_id,
+            "day": self.day,
+            "slot": self.slot,
+            "resumeCursor": self.resume_cursor,
+            "pendingEncounters": [
+                item.to_dict() for item in self.pending_encounters
+            ],
+            "periodDays": self.period_days,
+            "remainingDays": self.remaining_days,
+            "daysResolved": self.days_resolved,
+            "decisionsCollected": copy.deepcopy(self.decisions_collected),
+            "version": self.version,
+            "perDayResults": copy.deepcopy(self.per_day_results),
+            "currentDayResults": copy.deepcopy(self.current_day_results),
+            "currentSlotResults": copy.deepcopy(self.current_slot_results),
+            "periodSummaryInputs": copy.deepcopy(self.period_summary_inputs),
+            "queuedEvents": copy.deepcopy(self.queued_events),
+            "priorActiveEvents": list(self.prior_active_events),
+            "priorInternalEvents": list(self.prior_internal_events),
+            "dailyStateHashes": list(self.daily_state_hashes),
+            "seed": self.seed,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PausedRun:
+        return cls(
+            run_id=str(data["runId"]),
+            day=int(data["day"]),
+            slot=str(data["slot"]),
+            resume_cursor=str(data["resumeCursor"]),
+            pending_encounters=[
+                PendingEncounter.from_dict(item)
+                for item in data.get("pendingEncounters", [])
+            ],
+            period_days=int(data["periodDays"]),
+            remaining_days=int(data["remainingDays"]),
+            days_resolved=int(data["daysResolved"]),
+            decisions_collected=copy.deepcopy(data.get("decisionsCollected", {})),
+            version=int(data.get("version", 1)),
+            per_day_results=copy.deepcopy(data.get("perDayResults", [])),
+            current_day_results=copy.deepcopy(data.get("currentDayResults", [])),
+            current_slot_results=copy.deepcopy(data.get("currentSlotResults", [])),
+            period_summary_inputs=copy.deepcopy(data.get("periodSummaryInputs", [])),
+            queued_events=copy.deepcopy(data.get("queuedEvents", [])),
+            prior_active_events=list(data.get("priorActiveEvents", [])),
+            prior_internal_events=list(data.get("priorInternalEvents", [])),
+            daily_state_hashes=list(data.get("dailyStateHashes", [])),
+            seed=int(data["seed"]),
+        )
+
 
 class WorldTick:
     def __init__(self, seed: int = 7) -> None:
         self.seed = seed
         self.last_period_outcome: dict[str, Any] = {}
         self.last_policy_day_outcomes: list[dict[str, Any]] = []
+        self.last_period_state_hashes: list[str] = []
         self.settlement_tick = SettlementTick(seed)
 
     @staticmethod
@@ -222,36 +379,340 @@ class WorldTick:
         *,
         room_state: dict[str, Any] | None = None,
     ) -> WorldState:
-        world = WorldState.from_dict(
-            copy.deepcopy(world_state.to_dict() if hasattr(world_state, "to_dict") else world_state)
+        world, _ = self._run_period(
+            world_state,
+            event_queue,
+            period_days=1,
+            interactive=False,
+            room_state=room_state,
+            create_period_summary=False,
         )
-        prior_active_events = {
-            self._thread_event_signature(event)
-            for event in world.activeEvents
+        return world
+
+    def advance_period_until_interrupt(
+        self,
+        world_state: WorldState | dict[str, Any],
+        event_queue: WorldEventQueue,
+        *,
+        hours: int = 24,
+        room_state: dict[str, Any] | None = None,
+    ) -> tuple[WorldState, PausedRun | None]:
+        return self._run_period(
+            world_state,
+            event_queue,
+            period_days=max(1, hours // 24),
+            interactive=True,
+            room_state=room_state,
+            create_period_summary=True,
+        )
+
+    def resume_period(
+        self,
+        world_state: WorldState | dict[str, Any],
+        event_queue: WorldEventQueue,
+        paused_run: PausedRun | dict[str, Any],
+        choices: dict[str, Any] | None = None,
+        *,
+        room_state: dict[str, Any] | None = None,
+    ) -> tuple[WorldState, PausedRun | None]:
+        paused = (
+            PausedRun.from_dict(paused_run)
+            if isinstance(paused_run, dict)
+            else PausedRun.from_dict(paused_run.to_dict())
+        )
+        return self._run_period(
+            world_state,
+            event_queue,
+            period_days=paused.period_days,
+            interactive=True,
+            room_state=room_state,
+            create_period_summary=True,
+            paused_run=paused,
+            choices=choices or {},
+        )
+
+    def _run_period(
+        self,
+        world_state: WorldState | dict[str, Any],
+        event_queue: WorldEventQueue,
+        *,
+        period_days: int,
+        interactive: bool,
+        room_state: dict[str, Any] | None,
+        create_period_summary: bool,
+        paused_run: PausedRun | None = None,
+        choices: dict[str, Any] | None = None,
+    ) -> tuple[WorldState, PausedRun | None]:
+        world = WorldState.from_dict(
+            copy.deepcopy(
+                world_state.to_dict()
+                if hasattr(world_state, "to_dict")
+                else world_state
+            )
+        )
+        period_days = max(1, int(period_days))
+        decisions = copy.deepcopy(choices or {})
+        if paused_run is None:
+            world.currentTime = TIME_SLOTS[0][1]
+            days_resolved = 0
+            per_day_results: list[dict[str, Any]] = []
+            current_day_results: list[dict[str, Any]] = []
+            period_summary_inputs: list[dict[str, Any]] = []
+            daily_state_hashes: list[str] = []
+            version = 1
+            run_id = self._make_run_id(world, period_days)
+            prior_active_events = self._event_signatures(world.activeEvents)
+            prior_internal_events = self._event_signatures(world.internalEvents)
+            current_slot_results: list[dict[str, Any]] = []
+        else:
+            if paused_run.seed != self.seed:
+                raise ValueError("PausedRun seed does not match this WorldTick seed")
+            if paused_run.period_days != period_days:
+                raise ValueError("PausedRun period length does not match the resume request")
+            if world.currentDay != paused_run.day:
+                raise ValueError("World day does not match the paused run")
+            if self.slot_name_for_time(world.currentTime) != paused_run.slot:
+                raise ValueError("World slot does not match the paused run")
+            if paused_run.resume_cursor != self._next_slot_name(paused_run.slot):
+                raise ValueError("PausedRun resume cursor does not follow its paused slot")
+            world.currentDay = paused_run.day
+            world.currentTime = self.slot_time_for_name(paused_run.slot)
+            event_queue.replace_events(paused_run.queued_events)
+            days_resolved = paused_run.days_resolved
+            per_day_results = copy.deepcopy(paused_run.per_day_results)
+            current_day_results = copy.deepcopy(paused_run.current_day_results)
+            current_slot_results = copy.deepcopy(paused_run.current_slot_results)
+            period_summary_inputs = copy.deepcopy(paused_run.period_summary_inputs)
+            daily_state_hashes = list(paused_run.daily_state_hashes)
+            prior_active_events = set(paused_run.prior_active_events)
+            prior_internal_events = set(paused_run.prior_internal_events)
+            version = paused_run.version + 1
+            run_id = paused_run.run_id
+            for choice_player_id, choice in decisions.items():
+                paused_run.decisions_collected[str(choice_player_id)] = copy.deepcopy(choice)
+            decisions = copy.deepcopy(paused_run.decisions_collected)
+            world = self._resolve_pending_encounters(
+                world,
+                paused_run.pending_encounters,
+                current_slot_results,
+                decisions,
+            )
+            current_day_results.extend(current_slot_results)
+            current_slot_results = []
+            old_day = world.currentDay
+            world = self.advance_slot(
+                world,
+                event_queue,
+                run_autopilot=False,
+                room_state=room_state,
+            )
+            if world.currentDay > old_day:
+                self._finish_policy_day(
+                    world,
+                    old_day,
+                    current_day_results,
+                    per_day_results,
+                    period_summary_inputs,
+                    room_state,
+                    prior_active_events,
+                    prior_internal_events,
+                )
+                days_resolved += 1
+                daily_state_hashes.append(self._world_state_hash(world))
+                current_day_results = []
+                prior_active_events = self._event_signatures(world.activeEvents)
+                prior_internal_events = self._event_signatures(world.internalEvents)
+
+        self.last_policy_day_outcomes = []
+        self.last_period_state_hashes = list(daily_state_hashes)
+        if days_resolved:
+            self.last_policy_day_outcomes = copy.deepcopy(
+                per_day_results[-1]["results"]
+            )
+
+        while days_resolved < period_days:
+            slot_name = self.slot_name_for_time(world.currentTime)
+            world, slot_records, pending = self._process_policy_slot(
+                world,
+                slot_name,
+                room_state,
+            )
+            if interactive and pending:
+                self.last_policy_day_outcomes = copy.deepcopy(
+                    current_day_results + slot_records
+                )
+                return world, PausedRun(
+                    run_id=run_id,
+                    day=world.currentDay,
+                    slot=slot_name,
+                    resume_cursor=self._next_slot_name(slot_name),
+                    pending_encounters=pending,
+                    period_days=period_days,
+                    remaining_days=period_days - days_resolved,
+                    days_resolved=days_resolved,
+                    decisions_collected=decisions,
+                    version=version,
+                    per_day_results=per_day_results,
+                    current_day_results=current_day_results,
+                    current_slot_results=slot_records,
+                    period_summary_inputs=period_summary_inputs,
+                    queued_events=event_queue.to_list(),
+                    prior_active_events=sorted(prior_active_events),
+                    prior_internal_events=sorted(prior_internal_events),
+                    daily_state_hashes=daily_state_hashes,
+                    seed=self.seed,
+                )
+
+            world = self._resolve_pending_encounters(
+                world,
+                pending,
+                slot_records,
+                decisions,
+            )
+            current_day_results.extend(slot_records)
+            old_day = world.currentDay
+            world = self.advance_slot(
+                world,
+                event_queue,
+                run_autopilot=False,
+                room_state=room_state,
+            )
+            if world.currentDay > old_day:
+                self._finish_policy_day(
+                    world,
+                    old_day,
+                    current_day_results,
+                    per_day_results,
+                    period_summary_inputs,
+                    room_state,
+                    prior_active_events,
+                    prior_internal_events,
+                )
+                self.last_policy_day_outcomes = copy.deepcopy(current_day_results)
+                days_resolved += 1
+                daily_state_hashes.append(self._world_state_hash(world))
+                self.last_period_state_hashes = list(daily_state_hashes)
+                current_day_results = []
+                prior_active_events = self._event_signatures(world.activeEvents)
+                prior_internal_events = self._event_signatures(world.internalEvents)
+
+        if create_period_summary:
+            if period_summary_inputs:
+                self.last_period_outcome = self._roll_up_period(
+                    period_summary_inputs,
+                    period_days,
+                )
+                world.activeEvents.append({
+                    "type": "strategic_period_outcome",
+                    "day": world.currentDay,
+                    "summary": (
+                        f"Strategic period resolved at "
+                        f"{self.last_period_outcome['outcomeTier']}."
+                    ),
+                    "payload": copy.deepcopy(self.last_period_outcome),
+                })
+            else:
+                self.last_period_outcome = {}
+        return world, None
+
+    @staticmethod
+    def _world_state_hash(world: WorldState) -> str:
+        serialized = json.dumps(
+            world.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _event_signatures(events: list[Any]) -> set[str]:
+        return {
+            WorldTick._thread_event_signature(event)
+            for event in events
             if isinstance(event, dict)
         }
-        prior_internal_events = {
-            self._thread_event_signature(event)
-            for event in world.internalEvents
-            if isinstance(event, dict)
-        }
+
+    @staticmethod
+    def _next_slot_name(slot_name: str) -> str:
+        names = [name for name, _ in TIME_SLOTS]
+        index = names.index(slot_name)
+        return names[(index + 1) % len(names)]
+
+    def _make_run_id(self, world: WorldState, period_days: int) -> str:
+        serialized = json.dumps(
+            world.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        digest = hashlib.sha256(
+            f"{self.seed}:{period_days}:{serialized}".encode("utf-8")
+        ).hexdigest()
+        return digest[:24]
+
+    def _finish_policy_day(
+        self,
+        world: WorldState,
+        day: int,
+        day_results: list[dict[str, Any]],
+        per_day_results: list[dict[str, Any]],
+        period_summary_inputs: list[dict[str, Any]],
+        room_state: dict[str, Any] | None,
+        prior_active_events: set[str],
+        prior_internal_events: set[str],
+    ) -> None:
+        per_day_results.append({
+            "day": day,
+            "results": copy.deepcopy(day_results),
+        })
+        period_summary_inputs.extend(copy.deepcopy(day_results))
+        self._sync_threads_for_new_world_events(
+            world,
+            room_state,
+            prior_active_events,
+            prior_internal_events,
+        )
+
+    def _process_policy_slot(
+        self,
+        world: WorldState,
+        slot_name: str,
+        room_state: dict[str, Any] | None,
+    ) -> tuple[WorldState, list[dict[str, Any]], list[PendingEncounter]]:
+        slot_time = self.slot_time_for_name(slot_name)
+        world.currentTime = slot_time
+        slot_day = world.currentDay
         engine = SimulationEngine(seed=self.seed)
         library = get_library()
-        self.last_policy_day_outcomes = []
+        slot_records: list[dict[str, Any]] = []
+        pending: list[PendingEncounter] = []
+        player_ids = sorted(
+            str(player.get("id"))
+            for player in world.players
+            if isinstance(player, dict) and player.get("id") is not None
+        )
 
-        for slot_name, slot_time in TIME_SLOTS:
-            world.currentTime = slot_time
-            slot_day = world.currentDay
-            for player in list(world.players):
-                if not isinstance(player, dict):
-                    continue
-                policy = player.get("currentPolicy")
-                if not isinstance(policy, dict) or self._plan_slot(policy) != slot_name:
-                    continue
-                if player.get("alive", True) is False or player.get("health", 100) <= 0:
-                    continue
-                actor_id = str(player.get("id", ""))
-                status_effects_before = len(player.get("statusEffects", []))
+        for actor_id in player_ids:
+            player = next(
+                (
+                    item for item in world.players
+                    if isinstance(item, dict) and str(item.get("id")) == actor_id
+                ),
+                None,
+            )
+            if not isinstance(player, dict):
+                continue
+            policy = player.get("currentPolicy")
+            if (
+                isinstance(policy, dict)
+                and self._plan_slot(policy) == slot_name
+                and player.get("alive", True) is not False
+                and player.get("health", 100) > 0
+            ):
+                status_before = len(player.get("statusEffects", []))
                 result = engine.auto_resolve_policy_day(
                     world,
                     actor_id,
@@ -259,118 +720,232 @@ class WorldTick:
                     world.currentDay,
                 )
                 action = result.resolvedAction
+                world = self._commit_policy_result(
+                    world,
+                    result,
+                    action,
+                    actor_id,
+                    room_state,
+                )
+                record = self._record_slot_result(
+                    world,
+                    result,
+                    actor_id,
+                    slot_name,
+                    slot_day,
+                    slot_time,
+                    status_before,
+                )
+                record_index = len(slot_records)
+                slot_records.append(record)
                 if result.encounterOccurred:
                     if action is None:
                         raise RuntimeError("Triggered encounter is missing its resolved action")
-                    result = self.resolve_encounter_after_action(
-                        world,
+                    pending.append(self._pending_encounter(
                         result,
                         action,
-                        seed=action.parameters.get("seed", self.seed),
-                    )
-                if action is not None:
-                    self.apply_faction_relationship_changes(result, action)
-                if result.actionType == "establish_settlement" and action is not None:
-                    target_location_id = resolve_location_id(
-                        result.updatedWorldState,
-                        action.target,
-                    ) or action.target
-                    result.updatedWorldState = self.settlement_tick.apply_foundation_grant(
-                        result.updatedWorldState,
-                        settlement_id=action.actionId,
-                        location_id=target_location_id,
-                        action_id=action.actionId,
-                    )
-                if action is not None:
-                    _information_layer.record_action_discoveries(
-                        result.updatedWorldState,
-                        action_type=action.actionType,
-                        actor_id=actor_id,
-                        target=action.target,
-                        parameters=action.parameters,
-                        outcome_tier=result.outcomeTier,
-                    )
-                world = WorldState.from_dict(result.updatedWorldState)
-                self._apply_tactical_side_effects(world, result, actor_id, room_state)
-                self.last_policy_day_outcomes.append(
-                    self._record_slot_result(
-                        world,
-                        result,
                         actor_id,
-                        slot_name,
                         slot_day,
                         slot_time,
-                        status_effects_before,
-                    )
-                )
+                        False,
+                        record_index,
+                    ))
 
-            if slot_name == "night" and library.ambient_night is not None:
-                ambient = library.ambient_night
-                if ambient.enabled:
-                    for player in list(world.players):
-                        if (
-                            not isinstance(player, dict)
-                            or player.get("alive", True) is False
-                            or player.get("health", 100) <= 0
-                            or not self._is_outdoors(world, player)
-                        ):
-                            continue
-                        actor_id = str(player.get("id", ""))
-                        location_id = resolve_location_id(
-                            world.to_dict(),
-                            player.get("location"),
-                        )
-                        if location_id is None:
-                            continue
-                        status_effects_before = len(player.get("statusEffects", []))
-                        ambient_action = StructuredAction(
-                            actionId=f"ambient-{actor_id}-{world.currentDay}-night",
-                            actionType="ambient_noise",
-                            actor=actor_id,
-                            target=location_id,
-                            parameters={
-                                "seed": self.seed,
-                                "chainTemplate": ambient.chain_template,
-                            },
-                            timeCost=0,
-                        )
-                        result = engine.apply(world, ambient_action, rules="current")
-                        if result.encounterOccurred:
-                            result = self.resolve_encounter_after_action(
-                                world,
-                                result,
-                                ambient_action,
-                                seed=self.seed,
-                            )
-                        self.apply_faction_relationship_changes(result, ambient_action)
-                        world = WorldState.from_dict(result.updatedWorldState)
-                        ambient_record = self._record_slot_result(
-                            world,
-                            result,
-                            actor_id,
-                            slot_name,
-                            slot_day,
-                            slot_time,
-                            status_effects_before,
-                        )
-                        ambient_record["isAmbient"] = True
-                        self.last_policy_day_outcomes.append(
-                            ambient_record
-                        )
-
-            world = self.advance_slot(
-                world,
-                event_queue,
-                run_autopilot=False,
-                room_state=room_state,
+            if slot_name != "night" or library.ambient_night is None or not library.ambient_night.enabled:
+                continue
+            player = next(
+                (
+                    item for item in world.players
+                    if isinstance(item, dict) and str(item.get("id")) == actor_id
+                ),
+                None,
             )
+            if (
+                not isinstance(player, dict)
+                or player.get("alive", True) is False
+                or player.get("health", 100) <= 0
+                or not self._is_outdoors(world, player)
+            ):
+                continue
+            location_id = resolve_location_id(world.to_dict(), player.get("location"))
+            if location_id is None:
+                continue
+            status_before = len(player.get("statusEffects", []))
+            ambient_action = StructuredAction(
+                actionId=f"ambient-{actor_id}-{world.currentDay}-night",
+                actionType="ambient_noise",
+                actor=actor_id,
+                target=location_id,
+                parameters={
+                    "seed": self.seed,
+                    "chainTemplate": library.ambient_night.chain_template,
+                },
+                timeCost=0,
+            )
+            result = engine.apply(world, ambient_action, rules="current")
+            world = self._commit_policy_result(
+                world,
+                result,
+                ambient_action,
+                actor_id,
+                room_state,
+            )
+            record = self._record_slot_result(
+                world,
+                result,
+                actor_id,
+                slot_name,
+                slot_day,
+                slot_time,
+                status_before,
+            )
+            record["isAmbient"] = True
+            record_index = len(slot_records)
+            slot_records.append(record)
+            if result.encounterOccurred:
+                pending.append(self._pending_encounter(
+                    result,
+                    ambient_action,
+                    actor_id,
+                    slot_day,
+                    slot_time,
+                    True,
+                    record_index,
+                ))
+        return world, slot_records, pending
 
-        self._sync_threads_for_new_world_events(
-            world,
-            room_state,
-            prior_active_events,
-            prior_internal_events,
+    def _commit_policy_result(
+        self,
+        world: WorldState,
+        result: Any,
+        action: StructuredAction | None,
+        actor_id: str,
+        room_state: dict[str, Any] | None,
+    ) -> WorldState:
+        if action is not None:
+            self.apply_faction_relationship_changes(result, action)
+        if result.actionType == "establish_settlement" and action is not None:
+            target_location_id = resolve_location_id(
+                result.updatedWorldState,
+                action.target,
+            ) or action.target
+            result.updatedWorldState = self.settlement_tick.apply_foundation_grant(
+                result.updatedWorldState,
+                settlement_id=action.actionId,
+                location_id=target_location_id,
+                action_id=action.actionId,
+            )
+        if action is not None:
+            _information_layer.record_action_discoveries(
+                result.updatedWorldState,
+                action_type=action.actionType,
+                actor_id=actor_id,
+                target=action.target,
+                parameters=action.parameters,
+                outcome_tier=result.outcomeTier,
+            )
+        world = WorldState.from_dict(result.updatedWorldState)
+        self._apply_tactical_side_effects(world, result, actor_id, room_state)
+        return world
+
+    def _pending_encounter(
+        self,
+        result: Any,
+        action: StructuredAction,
+        actor_id: str,
+        day: int,
+        time: str,
+        is_ambient: bool,
+        record_index: int,
+    ) -> PendingEncounter:
+        roll_log = [
+            step.to_dict() if hasattr(step, "to_dict") else copy.deepcopy(step)
+            for step in result.rollLog
+        ]
+        encounter_index = next(
+            (
+                index for index, step in enumerate(roll_log)
+                if step.get("kind") == "encounter"
+                and step.get("triggered") is True
+            ),
+            None,
         )
+        if encounter_index is None:
+            raise RuntimeError("Encounter result has no triggered encounter step")
+        seed = action.parameters.get("seed", self.seed)
+        try:
+            seed = int(seed)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Encounter action seed must be an integer") from exc
+        return PendingEncounter(
+            player_id=actor_id,
+            action_id=action.actionId,
+            action_type=action.actionType,
+            target=action.target,
+            parameters=copy.deepcopy(action.parameters),
+            day=day,
+            time=time,
+            seed=seed,
+            plan_quality=float(result.planQuality),
+            encounter_step=str(roll_log[encounter_index]["name"]),
+            step_index=encounter_index,
+            roll_log=roll_log,
+            is_ambient=is_ambient,
+            outcome_tier=str(result.outcomeTier),
+            record_index=record_index,
+        )
+
+    def _resolve_pending_encounters(
+        self,
+        world: WorldState,
+        pending: list[PendingEncounter],
+        slot_records: list[dict[str, Any]],
+        choices: dict[str, Any],
+    ) -> WorldState:
+        for item in sorted(pending, key=lambda encounter: encounter.player_id):
+            choice = choices.get(item.player_id, "hold")
+            outcome, reason = resolve_pending_encounter(
+                item.to_dict(),
+                world,
+                chosen_option=choice if isinstance(choice, str) else None,
+            )
+            record = slot_records[item.record_index]
+            if outcome is None:
+                record["encounterOutcome"] = {
+                    "skipped": True,
+                    "reason": reason or "resolution_skipped",
+                }
+                record["encounterResolutionSkipped"] = reason or "resolution_skipped"
+                continue
+            updated_state, apply_reason = apply_pending_encounter(
+                world.to_dict(),
+                item.player_id,
+                outcome,
+            )
+            if apply_reason is not None:
+                record["encounterOutcome"] = {
+                    "skipped": True,
+                    "reason": apply_reason,
+                }
+                record["encounterResolutionSkipped"] = apply_reason
+                continue
+            world = WorldState.from_dict(updated_state)
+            outcome_record = outcome.to_dict()
+            outcome_record["slot"] = {
+                "day": item.day,
+                "name": self.slot_name_for_time(item.time),
+            }
+            record["encounterOutcome"] = outcome_record
+            record["chosenOption"] = choice
+            record["injuries"] += int(outcome.status_effect is not None)
+            event = {
+                "type": "encounter_resolution",
+                "day": item.day,
+                "slot": self.slot_name_for_time(item.time),
+                "summary": f"Encounter resolved as {outcome.outcome}.",
+                "payload": outcome.to_dict(),
+            }
+            world.activeEvents.append(copy.deepcopy(event))
         return world
 
     @staticmethod
@@ -790,35 +1365,14 @@ class WorldTick:
         *,
         room_state: dict[str, Any] | None = None,
     ) -> WorldState:
-        days = max(1, hours // 24)
-        daily_outcomes: list[dict[str, Any]] = []
-
-        for _ in range(days):
-            world = self.advance_policy_day(
-                world,
-                event_queue,
-                room_state=room_state,
-            )
-            daily_outcomes.extend(copy.deepcopy(self.last_policy_day_outcomes))
-
-        if daily_outcomes:
-            period_days = max(
-                [
-                    int(player.get("currentPolicy", {}).get("commitmentDays", DEFAULT_STRATEGIC_PERIOD_DAYS))
-                    for player in world.players
-                    if isinstance(player, dict) and isinstance(player.get("currentPolicy"), dict)
-                ]
-                or [DEFAULT_STRATEGIC_PERIOD_DAYS]
-            )
-            self.last_period_outcome = self._roll_up_period(daily_outcomes, period_days)
-            world.activeEvents.append({
-                "type": "strategic_period_outcome",
-                "day": world.currentDay,
-                "summary": f"Strategic period resolved at {self.last_period_outcome['outcomeTier']}.",
-                "payload": copy.deepcopy(self.last_period_outcome),
-            })
-        else:
-            self.last_period_outcome = {}
+        world, _ = self._run_period(
+            world,
+            event_queue,
+            period_days=max(1, hours // 24),
+            interactive=False,
+            room_state=room_state,
+            create_period_summary=True,
+        )
         return world
 
     def resolve_encounter_after_action(
@@ -832,48 +1386,98 @@ class WorldTick:
         if not result.encounterOccurred:
             return result
         state_dict = state.to_dict() if hasattr(state, "to_dict") else state
-        players = state_dict.get("players", []) if isinstance(state_dict, dict) else []
-        if isinstance(players, dict):
-            player = players.get(action.actor)
-        elif isinstance(players, list):
-            player = next(
-                (
-                    item for item in players
-                    if isinstance(item, dict) and item.get("id") == action.actor
-                ),
-                None,
-            )
-        else:
-            player = None
-        if not isinstance(player, dict):
-            raise ValueError(f"Encounter actor {action.actor!r} is missing")
-
-        outcome = resolve_encounter(
-            state,
-            player,
-            action,
-            result,
-            self.seed if seed is None else seed,
+        roll_log = [
+            step.to_dict() if hasattr(step, "to_dict") else copy.deepcopy(step)
+            for step in result.rollLog
+        ]
+        step_index = next(
+            (
+                index for index, step in enumerate(roll_log)
+                if step.get("kind") == "encounter"
+                and step.get("triggered") is True
+            ),
+            None,
         )
-        slot = self.slot_name_for_time(state_dict.get("currentTime"))
-        outcome_record = outcome.to_dict()
-        outcome_record["slot"] = {
+        if step_index is None:
+            raise RuntimeError("Encounter result has no triggered encounter step")
+        pending = {
+            "playerId": str(action.actor),
+            "actionId": str(action.actionId),
+            "actionType": str(action.actionType),
+            "target": str(action.target),
+            "parameters": copy.deepcopy(action.parameters),
             "day": int(state_dict.get("currentDay", 1)),
-            "name": slot,
+            "time": str(state_dict.get("currentTime", "00:00")),
+            "seed": self.seed if seed is None else int(seed),
+            "planQuality": float(result.planQuality),
+            "encounterStep": str(roll_log[step_index]["name"]),
+            "stepIndex": step_index,
+            "rollLog": roll_log,
         }
-        result.updatedWorldState = apply_encounter_outcome(
+        outcome, reason = resolve_pending_encounter(pending, state)
+        if outcome is None:
+            skip = {"skipped": True, "reason": reason or "resolution_skipped"}
+            result.encounterOutcome = skip
+            result.encounterDetails = {
+                **(result.encounterDetails if isinstance(result.encounterDetails, dict) else {}),
+                "resolution": skip,
+            }
+            event = {
+                "type": "encounter_resolution_skipped",
+                "day": pending["day"],
+                "slot": self.slot_name_for_time(pending["time"]),
+                "summary": f"Encounter resolution skipped: {skip['reason']}.",
+            }
+            result.worldEventsTriggered.append(event)
+            updated_world = result.updatedWorldState.get(
+                "world_state",
+                result.updatedWorldState,
+            )
+            if isinstance(updated_world, dict):
+                updated_world.setdefault("activeEvents", []).append(copy.deepcopy(event))
+            return result
+
+        updated_state, apply_reason = apply_pending_encounter(
             result.updatedWorldState,
-            action.actor,
+            str(action.actor),
             outcome,
         )
+        if apply_reason is not None:
+            skip = {"skipped": True, "reason": apply_reason}
+            result.encounterOutcome = skip
+            result.encounterDetails = {
+                **(result.encounterDetails if isinstance(result.encounterDetails, dict) else {}),
+                "resolution": skip,
+            }
+            event = {
+                "type": "encounter_resolution_skipped",
+                "day": pending["day"],
+                "slot": self.slot_name_for_time(pending["time"]),
+                "summary": f"Encounter resolution skipped: {apply_reason}.",
+            }
+            result.worldEventsTriggered.append(event)
+            updated_world = result.updatedWorldState.get(
+                "world_state",
+                result.updatedWorldState,
+            )
+            if isinstance(updated_world, dict):
+                updated_world.setdefault("activeEvents", []).append(copy.deepcopy(event))
+            return result
+        result.updatedWorldState = updated_state
+        slot = self.slot_name_for_time(pending["time"])
+        outcome_record = outcome.to_dict()
+        outcome_record["slot"] = {
+            "day": pending["day"],
+            "name": slot,
+        }
         result.encounterOutcome = outcome_record
         result.encounterDetails = {
-            **result.encounterDetails,
+            **(result.encounterDetails if isinstance(result.encounterDetails, dict) else {}),
             "resolution": outcome_record,
         }
         event = {
             "type": "encounter_resolution",
-            "day": int(state_dict.get("currentDay", 1)),
+            "day": pending["day"],
             "slot": slot,
             "summary": f"Encounter resolved as {outcome.outcome}.",
             "payload": outcome.to_dict(),

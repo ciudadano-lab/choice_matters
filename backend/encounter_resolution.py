@@ -7,6 +7,7 @@ import math
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from probability_config import PLAN_MODIFIER_CAP, clamp_player_stat
@@ -345,6 +346,61 @@ def resolve_encounter(
     )
 
 
+def resolve_pending_encounter(
+    pending: dict[str, Any],
+    current_state: Any,
+    *,
+    chosen_option: str | None = None,
+) -> tuple[EncounterOutcome | None, str | None]:
+    world = copy.deepcopy(_state_dict(current_state))
+    player_id = str(pending.get("playerId", ""))
+    player = _player_from(world, player_id)
+    if player is None:
+        return None, "actor_missing"
+    if player.get("alive", True) is False or _numeric(player.get("health"), 100) <= 0:
+        return None, "actor_dead"
+
+    world["currentDay"] = int(pending["day"])
+    world["currentTime"] = str(pending["time"])
+    action = SimpleNamespace(
+        actionId=str(pending["actionId"]),
+        actionType=str(pending["actionType"]),
+        actor=player_id,
+        target=str(pending.get("target", "")),
+        parameters=copy.deepcopy(pending.get("parameters", {})),
+    )
+    chain_result = SimpleNamespace(
+        encounterOccurred=True,
+        planQuality=float(pending.get("planQuality", 0.0)),
+    )
+    # Tactical option effects are introduced in Stage B; Stage A preserves the choice.
+    _ = chosen_option
+    return (
+        resolve_encounter(
+            world,
+            player,
+            action,
+            chain_result,
+            int(pending["seed"]),
+        ),
+        None,
+    )
+
+
+def apply_pending_encounter(
+    current_state: dict[str, Any],
+    player_id: str,
+    outcome: EncounterOutcome,
+) -> tuple[dict[str, Any], str | None]:
+    world = _state_dict(current_state)
+    player = _player_from(world, player_id)
+    if player is None:
+        return copy.deepcopy(current_state), "actor_missing"
+    if player.get("alive", True) is False or _numeric(player.get("health"), 100) <= 0:
+        return copy.deepcopy(current_state), "actor_dead"
+    return apply_encounter_outcome(current_state, player_id, outcome), None
+
+
 def apply_encounter_outcome(
     state: dict[str, Any],
     player_id: str,
@@ -352,19 +408,7 @@ def apply_encounter_outcome(
 ) -> dict[str, Any]:
     updated = copy.deepcopy(state)
     world = _state_dict(updated)
-    players = world.get("players", [])
-    if isinstance(players, dict):
-        player = players.get(player_id)
-    elif isinstance(players, list):
-        player = next(
-            (
-                record for record in players
-                if isinstance(record, dict) and record.get("id") == player_id
-            ),
-            None,
-        )
-    else:
-        player = None
+    player = _player_from(world, player_id)
     if not isinstance(player, dict):
         raise ValueError(f"Encounter actor {player_id!r} is missing from the result state")
 
@@ -382,3 +426,20 @@ def apply_encounter_outcome(
         for name, delta in outcome.resource_changes.items():
             resources[name] = max(0, int(_numeric(resources.get(name))) + delta)
     return updated
+
+
+def _player_from(world: dict[str, Any], player_id: str) -> dict[str, Any] | None:
+    players = world.get("players", [])
+    if isinstance(players, dict):
+        player = players.get(player_id)
+    elif isinstance(players, list):
+        player = next(
+            (
+                record for record in players
+                if isinstance(record, dict) and str(record.get("id")) == player_id
+            ),
+            None,
+        )
+    else:
+        player = None
+    return player if isinstance(player, dict) else None
