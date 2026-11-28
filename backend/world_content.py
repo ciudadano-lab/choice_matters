@@ -149,6 +149,7 @@ class RetentionPolicy(StrictContentModel):
     world_history: StrictInt = Field(gt=0)
     internal_events: StrictInt = Field(gt=0)
     relationships: StrictInt = Field(gt=0)
+    player_threads: StrictInt = Field(gt=0, default=25)
 
 
 class SplinterRules(StrictContentModel):
@@ -209,6 +210,13 @@ class DiscoveryRules(StrictContentModel):
     )
 
 
+class WorldThreadRules(StrictContentModel):
+    faction_event_summary: str
+    faction_event_stakes: str
+    settlement_status_summary: str
+    settlement_status_stakes: str
+
+
 class FactionRules(StrictContentModel):
     goal_vocabulary: tuple[str, ...]
     faction_disposition_scale_factor: StrictInt = Field(gt=0, default=5)
@@ -222,6 +230,14 @@ class FactionRules(StrictContentModel):
     splinter: SplinterRules
     decisions: FactionDecisionRules
     discovery: DiscoveryRules = Field(default_factory=DiscoveryRules)
+    threads: WorldThreadRules = Field(
+        default_factory=lambda: WorldThreadRules(
+            faction_event_summary="{name} has made a move that may affect nearby survivors.",
+            faction_event_stakes="Its actions could change local safety or alliances.",
+            settlement_status_summary="Conditions at {name} have shifted.",
+            settlement_status_stakes="Its stability may affect safety and local support.",
+        )
+    )
 
 
 class WorldContent(StrictContentModel):

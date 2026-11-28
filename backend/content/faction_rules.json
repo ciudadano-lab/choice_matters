@@ -16,7 +16,8 @@
     "active_events": 25,
     "world_history": 25,
     "internal_events": 50,
-    "relationships": 50
+    "relationships": 50,
+    "player_threads": 25
   },
   "max_factions": 8,
   "splinter": {
@@ -41,6 +42,12 @@
     "interaction_repeat_count": 2,
     "report_level": "heard_of",
     "report_sources": ["rumor", "radio_report", "survivor_report"]
+  },
+  "threads": {
+    "faction_event_summary": "{name} has made a move that may affect nearby survivors.",
+    "faction_event_stakes": "Its actions could change local safety or alliances.",
+    "settlement_status_summary": "Conditions at {name} have shifted.",
+    "settlement_status_stakes": "Its stability may affect safety and local support."
   },
   "decisions": {
     "interval_days": 7,

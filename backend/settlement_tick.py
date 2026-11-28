@@ -71,6 +71,8 @@ class SettlementTick:
                         "type": "settlement_tick",
                         "day": day,
                         "settlementId": settlement.get("id"),
+                        "statusChanged": status_changed,
+                        "status": settlement.get("status"),
                         "reasons": reasons,
                     })
                     event_count += 1

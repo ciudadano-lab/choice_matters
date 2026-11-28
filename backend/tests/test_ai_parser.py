@@ -1,3 +1,4 @@
+import copy
 import json
 
 from game_data import build_system_prompt, fresh_room_state
@@ -243,6 +244,185 @@ def test_resolved_target_slot_uses_explicit_target_or_entity_owner():
 
     assert _resolved_target_slot(explicit_action, 3) == 3
     assert _resolved_target_slot(entity_action, None) == 2
+
+
+def test_narrator_world_block_is_player_scoped_and_uses_discovery_projection():
+    from main import _build_ai_narration_prompt
+    from simulation_engine import SimulationResult, StructuredAction
+    from world_state import WorldState
+
+    room = fresh_room_state(seed=404)
+    world = WorldState.from_dict(room["world_state"])
+    faction_ids = {item["id"] for item in world.factions}
+    settlement_ids = [item["id"] for item in world.settlements]
+    npc_ids = sorted(world.npcs)
+    assert {"faction_survivors", "faction_watch"}.issubset(faction_ids)
+    assert len(settlement_ids) >= 2 and len(npc_ids) >= 2
+
+    world.playerKnownWorld["players"]["player_1"]["factions"] = {
+        "faction_survivors": "known",
+    }
+    world.playerKnownWorld["players"]["player_1"]["settlements"] = {
+        settlement_ids[0]: "met",
+    }
+    world.playerKnownWorld["players"]["player_2"]["factions"] = {
+        "faction_watch": "known",
+    }
+    world.playerKnownWorld["players"]["player_2"]["settlements"] = {
+        settlement_ids[1]: "known",
+    }
+    world.players[0]["entities"]["knownCharacters"] = [{
+        "npcId": npc_ids[0],
+        "knownFacts": {},
+        "relationship": {},
+    }]
+    world.players[1]["entities"]["knownCharacters"] = [{
+        "npcId": npc_ids[1],
+        "knownFacts": {},
+        "relationship": {},
+    }]
+    room["world_state"] = world.to_dict()
+
+    action = StructuredAction("world-knowledge", "rest", "player_1", "camp")
+    result = SimulationResult(
+        actionId=action.actionId,
+        actionType=action.actionType,
+        timeConsumed=0,
+        resourceChanges={},
+        playerStatusChanges=[],
+        locationChanges=[],
+        encounterProbability=0.0,
+        encounterOccurred=False,
+        encounterDetails={},
+        factionRelationshipChanges=[],
+        informationDiscovered=[],
+        worldEventsTriggered=[],
+        updatedWorldState=room["world_state"],
+    )
+
+    def world_block(player_num: int) -> str:
+        prompt = _build_ai_narration_prompt(
+            player_num,
+            room,
+            action,
+            result,
+            "Wait and observe.",
+        )
+        return prompt.split("WORLD STATE YOU KNOW\n", 1)[1].split(
+            "\nPLAYER INPUT:", 1
+        )[0]
+
+    player_one = world_block(1)
+    player_two = world_block(2)
+    assert "Local Survivors" in player_one
+    assert "Local Survivors" not in player_two
+    assert "Northside Watch" in player_two
+    assert "Northside Watch" not in player_one
+    assert world.settlements[0]["name"] in player_one
+    assert world.settlements[1]["name"] in player_two
+    assert world.npcs[npc_ids[0]]["name"] in player_one
+    assert world.npcs[npc_ids[1]]["name"] in player_two
+    assert "goals" not in player_one.lower() + player_two.lower()
+    assert "population" not in player_one.lower() + player_two.lower()
+    assert "strength" not in player_one.lower() + player_two.lower()
+    assert not any(character.isdigit() for character in player_one + player_two)
+
+
+def test_merge_state_validates_thread_links_and_keeps_old_threads_unchanged():
+    from main import merge_state
+
+    old_thread = {"id": "legacy_thread", "status": "open", "summary": "Old thread"}
+    room = {
+        "players": {
+            "1": {
+                "facts": {},
+                "threads": [copy.deepcopy(old_thread)],
+                "entities": {"knownCharacters": []},
+            },
+        },
+        "world_state": {
+            "players": [{"id": "player_1", "entities": {"knownCharacters": []}}],
+            "npcs": {"npc_known": {"id": "npc_known", "status": "alive"}},
+            "factions": [{"id": "faction_known"}],
+            "settlements": [{"id": "settlement_known"}],
+        },
+    }
+
+    merge_state(room, 1, {
+        "threads": [{
+            "id": "validated_thread",
+            "status": "open",
+            "summary": "Known entities only",
+            "npcIds": ["npc_known", "npc_missing"],
+            "factionIds": ["faction_known", "faction_missing"],
+            "settlementId": "settlement_missing",
+        }],
+    })
+
+    assert room["players"]["1"]["threads"][0] == old_thread
+    validated = room["players"]["1"]["threads"][1]
+    assert validated["npcIds"] == ["npc_known"]
+    assert validated["factionIds"] == ["faction_known"]
+    assert "settlementId" not in validated
+
+
+def test_characters_delta_updates_only_player_npc_reference_and_not_dead_npc():
+    from main import merge_state
+    from world_state import normalize_room_state
+
+    dead_npc = {
+        "id": "npc_dead",
+        "name": "Mara",
+        "role": "leader",
+        "status": "dead",
+        "loyalty": 10,
+        "location": "school",
+    }
+    room = {
+        "players": {
+            "1": {
+                "facts": {},
+                "threads": [],
+                "entities": {"knownCharacters": []},
+            },
+        },
+        "world_state": {
+            "players": [{"id": "player_1", "entities": {"knownCharacters": []}}],
+            "npcs": {"npc_dead": copy.deepcopy(dead_npc)},
+        },
+    }
+
+    merge_state(room, 1, {
+        "characters_delta": [
+            {
+                "npcId": "npc_dead",
+                "knownFacts": {"met_at": "the clinic"},
+                "relationship": {"trust": 0.7},
+                "status": "alive",
+                "health": 100,
+                "location": "safehouse",
+            },
+            {"npcId": "npc_unknown", "knownFacts": {"invented": True}},
+            {"id": "legacy_survivor", "name": "Legacy Survivor", "status": "encountered"},
+        ],
+    })
+
+    expected_reference = {
+        "npcId": "npc_dead",
+        "knownFacts": {"met_at": "the clinic"},
+        "relationship": {"trust": 0.7},
+    }
+    assert room["players"]["1"]["entities"]["knownCharacters"][0] == expected_reference
+    assert len(room["players"]["1"]["entities"]["knownCharacters"]) == 2
+    assert room["world_state"]["players"][0]["entities"]["knownCharacters"] == [expected_reference]
+    assert room["world_state"]["npcs"]["npc_dead"] == dead_npc
+    assert room["players"]["1"]["entities"]["knownCharacters"][1]["id"] == "legacy_survivor"
+
+    legacy_room = fresh_room_state(seed=405)
+    legacy_thread = {"id": "legacy", "status": "dormant", "summary": "Loaded unchanged"}
+    legacy_room["players"]["1"]["threads"] = [legacy_thread]
+    normalized = normalize_room_state(legacy_room)
+    assert normalized["players"]["1"]["threads"] == [legacy_thread]
 
 
 def test_action_payload_marks_impossible_claim_as_failed_attempt():

@@ -39,6 +39,7 @@ from plan_features import PlanFeatures
 from simulation_engine import SimulationEngine, StructuredAction
 from world_state import WorldState
 from world_tick import WorldTick, WorldEventQueue
+from world_content import load_world_content
 from ws_manager import manager
 
 load_backend_env()
@@ -359,18 +360,136 @@ def merge_state(room_state: dict, player_num: int, payload: dict | None):
                 st["facts"][key] = value
     threads = payload.get("threads")
     if isinstance(threads, list):
+        world = room_state.get("world_state", {})
+        faction_ids = {
+            str(item.get("id"))
+            for item in world.get("factions", [])
+            if isinstance(item, dict) and item.get("id") is not None
+        } if isinstance(world, dict) else set()
+        settlement_ids = {
+            str(item.get("id"))
+            for item in world.get("settlements", [])
+            if isinstance(item, dict) and item.get("id") is not None
+        } if isinstance(world, dict) else set()
+        npc_ids = set(world.get("npcs", {})) if isinstance(world, dict) and isinstance(world.get("npcs"), dict) else set()
+        thread_list = st.setdefault("threads", [])
+        if not isinstance(thread_list, list):
+            thread_list = []
+            st["threads"] = thread_list
         for update in threads:
-            existing = next((t for t in st["threads"] if t["id"] == update.get("id")), None)
+            if not isinstance(update, dict) or not isinstance(update.get("id"), str):
+                continue
+            clean_update = copy.deepcopy(update)
+            if "npcIds" in clean_update:
+                values = clean_update["npcIds"]
+                clean_update["npcIds"] = (
+                    [item for item in values if isinstance(item, str) and item in npc_ids]
+                    if isinstance(values, list)
+                    else []
+                )
+            if "factionIds" in clean_update:
+                values = clean_update["factionIds"]
+                clean_update["factionIds"] = (
+                    [item for item in values if isinstance(item, str) and item in faction_ids]
+                    if isinstance(values, list)
+                    else []
+                )
+            if "settlementId" in clean_update:
+                settlement_id = clean_update["settlementId"]
+                if not isinstance(settlement_id, str) or settlement_id not in settlement_ids:
+                    clean_update.pop("settlementId")
+            existing = next((t for t in thread_list if isinstance(t, dict) and t.get("id") == clean_update["id"]), None)
             if existing:
-                existing.update(update)
+                existing.update(clean_update)
             else:
-                st["threads"].append(update)
+                thread_list.append(clean_update)
+        st["threads"] = thread_list[-load_world_content().faction_rules.retention.player_threads:]
     characters_delta = payload.get("characters_delta")
     if isinstance(characters_delta, list):
         entities = st.setdefault("entities", {})
+        if not isinstance(entities, dict):
+            entities = {}
+            st["entities"] = entities
         known_characters = entities.setdefault("knownCharacters", [])
+        if not isinstance(known_characters, list):
+            known_characters = []
+            entities["knownCharacters"] = known_characters
+        world = room_state.get("world_state", {})
+        world_npcs = world.get("npcs", {}) if isinstance(world, dict) else {}
         for update in characters_delta:
             if not isinstance(update, dict):
+                continue
+            npc_id = update.get("npcId")
+            if npc_id is not None:
+                if not isinstance(npc_id, str) or not isinstance(world_npcs, dict) or npc_id not in world_npcs:
+                    continue
+                existing = next(
+                    (
+                        entry for entry in known_characters
+                        if isinstance(entry, dict) and entry.get("npcId") == npc_id
+                    ),
+                    None,
+                )
+                reference = {
+                    "npcId": npc_id,
+                    "knownFacts": copy.deepcopy(
+                        existing.get("knownFacts", {})
+                        if isinstance(existing, dict)
+                        and isinstance(existing.get("knownFacts"), dict)
+                        else {}
+                    ),
+                    "relationship": copy.deepcopy(
+                        existing.get("relationship", {})
+                        if isinstance(existing, dict)
+                        and isinstance(existing.get("relationship"), dict)
+                        else {}
+                    ),
+                }
+                known_facts = update.get("knownFacts")
+                relationship = update.get("relationship")
+                if isinstance(known_facts, dict):
+                    reference["knownFacts"] = copy.deepcopy(known_facts)
+                if isinstance(relationship, dict):
+                    reference["relationship"] = copy.deepcopy(relationship)
+                room_index = next(
+                    (
+                        index for index, entry in enumerate(known_characters)
+                        if isinstance(entry, dict) and entry.get("npcId") == npc_id
+                    ),
+                    None,
+                )
+                if room_index is None:
+                    known_characters.append(reference)
+                else:
+                    known_characters[room_index] = reference
+                world_players = world.get("players", []) if isinstance(world, dict) else []
+                world_player = next(
+                    (
+                        item for item in world_players
+                        if isinstance(item, dict) and item.get("id") == f"player_{player_num}"
+                    ),
+                    None,
+                )
+                if isinstance(world_player, dict):
+                    world_entities = world_player.setdefault("entities", {})
+                    if not isinstance(world_entities, dict):
+                        world_entities = {}
+                        world_player["entities"] = world_entities
+                    world_known_characters = world_entities.setdefault("knownCharacters", [])
+                    if not isinstance(world_known_characters, list):
+                        world_known_characters = []
+                        world_entities["knownCharacters"] = world_known_characters
+                    world_index = next(
+                        (
+                            index for index, entry in enumerate(world_known_characters)
+                            if isinstance(entry, dict) and entry.get("npcId") == npc_id
+                        ),
+                        None,
+                    )
+                    if world_index is None:
+                        world_known_characters.append(copy.deepcopy(reference))
+                    else:
+                        world_known_characters[world_index] = copy.deepcopy(reference)
                 continue
             existing = next((entry for entry in known_characters if entry.get("id") == update.get("id")), None)
             if existing:
@@ -608,6 +727,40 @@ def _parse_json_payload(raw_text: str) -> Any:
 
 def _build_ai_narration_prompt(player_num: int, room_state: dict, action: StructuredAction, result: Any, user_text: str, interaction_target: int | None = None) -> str:
     base_prompt = build_system_prompt(player_num, room_state, interaction_target=interaction_target)
+    actor_id = f"player_{player_num}"
+    known_world = InformationLayer().get_player_known_world(
+        room_state.get("world_state", {}),
+        player_id=actor_id,
+    )
+    faction_lines = [
+        f"- {item.get('name', item['id'])} [{item['id']}] ({item['discoveryLevel']})"
+        for item in known_world["factions"]
+        if isinstance(item, dict) and item.get("id") and item.get("discoveryLevel")
+    ]
+    settlement_lines = []
+    for item in known_world["settlements"]:
+        if not isinstance(item, dict) or not item.get("id") or not item.get("discoveryLevel"):
+            continue
+        details = [str(item["discoveryLevel"])]
+        if isinstance(item.get("status"), str):
+            details.append(f"status: {item['status']}")
+        settlement_lines.append(
+            f"- {item.get('name', item['id'])} [{item['id']}] ({'; '.join(details)})"
+        )
+    npc_lines = [
+        f"- {item['name']} [{item['id']}] (role: {item['role']}; status: {item['status']})"
+        for item in known_world["npcs"]
+    ]
+    world_knowledge_block = "\n".join([
+        "WORLD STATE YOU KNOW",
+        "Factions:",
+        *(faction_lines or ["(none discovered)"]),
+        "Settlements:",
+        *(settlement_lines or ["(none discovered)"]),
+        "World NPCs you have met:",
+        *(npc_lines or ["(none)"]),
+        "Reuse these entity ids exactly. Do not contradict a listed status. Never kill, move, or re-stat a world NPC; only simulation engine events can change a world NPC.",
+    ])
     action_parameters = {k: v for k, v in action.parameters.items() if v}
     action_params_text = "" if not action_parameters else f"Parameters: {action_parameters}\n"
     result_lines = [
@@ -728,6 +881,8 @@ def _build_ai_narration_prompt(player_num: int, room_state: dict, action: Struct
     prompt_block = "\n".join(prompt_lines)
 
     return f"""{base_prompt}
+
+{world_knowledge_block}
 
 PLAYER INPUT:
 {user_text}

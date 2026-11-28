@@ -1227,3 +1227,48 @@ def test_world_tick_generates_faction_summary_events_for_world_context():
 
     summaries = [item.summary for item in queue._events]
     assert any("Survivors expanded into" in summary or "expanded into" in summary.lower() for summary in summaries)
+
+
+def test_faction_and_known_settlement_events_create_linked_threads():
+    from game_data import fresh_room_state
+
+    room = fresh_room_state(seed=551)
+    world = WorldState.from_dict(room["world_state"])
+    world.currentDay = 6
+    player_discoveries = world.playerKnownWorld["players"]["player_1"]["settlements"]
+    known_settlement_id = next(iter(player_discoveries))
+    known_settlement = next(
+        item for item in world.settlements if item["id"] == known_settlement_id
+    )
+    known_settlement["stores"]["food"] = 0
+    known_settlement["stores"]["water"] = 0
+    known_settlement["status"] = "stable"
+    known_settlement["status_pressure_ticks"] = 1
+
+    updated = WorldTick(seed=551).advance(
+        world,
+        WorldEventQueue(),
+        hours=24,
+        run_autopilot=False,
+        room_state=room,
+    )
+    threads = room["players"]["1"]["threads"]
+
+    faction_thread = next(
+        item for item in threads
+        if "faction_survivors" in item.get("factionIds", [])
+    )
+    settlement_thread = next(
+        item for item in threads
+        if item.get("settlementId") == known_settlement_id
+    )
+    assert faction_thread["status"] == "open"
+    assert faction_thread["stakes"]
+    assert settlement_thread["status"] == "open"
+    assert settlement_thread["stakes"]
+    assert any(
+        event.get("type") == "settlement_tick"
+        and event.get("settlementId") == known_settlement_id
+        and event.get("statusChanged") is True
+        for event in updated.internalEvents
+    )

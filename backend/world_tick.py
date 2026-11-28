@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -224,6 +225,16 @@ class WorldTick:
         world = WorldState.from_dict(
             copy.deepcopy(world_state.to_dict() if hasattr(world_state, "to_dict") else world_state)
         )
+        prior_active_events = {
+            self._thread_event_signature(event)
+            for event in world.activeEvents
+            if isinstance(event, dict)
+        }
+        prior_internal_events = {
+            self._thread_event_signature(event)
+            for event in world.internalEvents
+            if isinstance(event, dict)
+        }
         engine = SimulationEngine(seed=self.seed)
         library = get_library()
         self.last_policy_day_outcomes = []
@@ -354,7 +365,177 @@ class WorldTick:
                 room_state=room_state,
             )
 
+        self._sync_threads_for_new_world_events(
+            world,
+            room_state,
+            prior_active_events,
+            prior_internal_events,
+        )
         return world
+
+    @staticmethod
+    def _thread_event_signature(event: dict[str, Any]) -> str:
+        return json.dumps(event, sort_keys=True, separators=(",", ":"), default=str)
+
+    def _sync_threads_for_new_world_events(
+        self,
+        world: WorldState,
+        room_state: dict[str, Any] | None,
+        prior_active_events: set[str],
+        prior_internal_events: set[str],
+    ) -> None:
+        if not isinstance(room_state, dict):
+            return
+        room_players = room_state.get("players", {})
+        if not isinstance(room_players, dict):
+            return
+
+        rules = load_world_content().faction_rules
+        rank = {"heard_of": 1, "met": 2, "known": 3}
+        discoveries = world.playerKnownWorld.get("players", {})
+        faction_by_id = {
+            str(item.get("id")): item
+            for item in world.factions
+            if isinstance(item, dict) and item.get("id") is not None
+        }
+        settlement_by_id = {
+            str(item.get("id")): item
+            for item in world.settlements
+            if isinstance(item, dict) and item.get("id") is not None
+        }
+        new_faction_events = [
+            event for event in world.activeEvents
+            if isinstance(event, dict)
+            and event.get("type") == "faction_action"
+            and self._thread_event_signature(event) not in prior_active_events
+        ]
+        new_settlement_events = [
+            event for event in world.internalEvents
+            if isinstance(event, dict)
+            and event.get("type") == "settlement_tick"
+            and event.get("statusChanged") is True
+            and self._thread_event_signature(event) not in prior_internal_events
+        ]
+
+        for player in world.players:
+            if not isinstance(player, dict) or player.get("id") is None:
+                continue
+            player_id = str(player["id"])
+            player_discoveries = discoveries.get(player_id, {})
+            if not isinstance(player_discoveries, dict):
+                continue
+            room_player = room_players.get(player_id.removeprefix("player_"))
+            if not isinstance(room_player, dict):
+                room_player = next(
+                    (
+                        item for item in room_players.values()
+                        if isinstance(item, dict) and item.get("id") == player_id
+                    ),
+                    None,
+                )
+            if not isinstance(room_player, dict):
+                continue
+            threads = room_player.setdefault("threads", [])
+            if not isinstance(threads, list):
+                threads = []
+                room_player["threads"] = threads
+
+            faction_discoveries = player_discoveries.get("factions", {})
+            settlement_discoveries = player_discoveries.get("settlements", {})
+
+            def known(entity_type: str, entity_id: str) -> bool:
+                records = faction_discoveries if entity_type == "factions" else settlement_discoveries
+                level = records.get(entity_id) if isinstance(records, dict) else None
+                return level in rank
+
+            for event in new_faction_events:
+                target = event.get("target")
+                target = target if isinstance(target, dict) else {}
+                faction_id = event.get("factionId")
+                faction_id = str(faction_id) if faction_id is not None else None
+                settlement_id = target.get("settlementId")
+                settlement_id = str(settlement_id) if settlement_id is not None else None
+                linked_faction = faction_id if faction_id in faction_by_id and known("factions", faction_id) else None
+                linked_settlement = (
+                    settlement_id
+                    if settlement_id in settlement_by_id and known("settlements", settlement_id)
+                    else None
+                )
+                if linked_faction is None and linked_settlement is None:
+                    continue
+                name = (
+                    faction_by_id[linked_faction].get("name", linked_faction)
+                    if linked_faction is not None
+                    else settlement_by_id[linked_settlement].get("name", linked_settlement)
+                )
+                thread_key = (
+                    f"faction:{linked_faction}"
+                    if linked_faction is not None
+                    else f"settlement:{linked_settlement}"
+                )
+                thread_id = "world_" + hashlib.sha256(thread_key.encode("utf-8")).hexdigest()[:16]
+                self._upsert_world_thread(
+                    threads,
+                    {
+                        "id": thread_id,
+                        "status": "open",
+                        "summary": rules.threads.faction_event_summary.format(name=name),
+                        "stakes": rules.threads.faction_event_stakes,
+                        **({"factionIds": [linked_faction]} if linked_faction is not None else {}),
+                        **({"settlementId": linked_settlement} if linked_settlement is not None else {}),
+                    },
+                    rules.retention.player_threads,
+                )
+
+            for event in new_settlement_events:
+                settlement_id = str(event.get("settlementId", ""))
+                settlement = settlement_by_id.get(settlement_id)
+                if settlement is None or not known("settlements", settlement_id):
+                    continue
+                faction_id = settlement.get("faction_id")
+                linked_faction = (
+                    str(faction_id)
+                    if faction_id is not None
+                    and str(faction_id) in faction_by_id
+                    and known("factions", str(faction_id))
+                    else None
+                )
+                thread_id = "world_" + hashlib.sha256(
+                    f"settlement:{settlement_id}".encode("utf-8")
+                ).hexdigest()[:16]
+                self._upsert_world_thread(
+                    threads,
+                    {
+                        "id": thread_id,
+                        "status": "open",
+                        "summary": rules.threads.settlement_status_summary.format(
+                            name=settlement.get("name", settlement_id)
+                        ),
+                        "stakes": rules.threads.settlement_status_stakes,
+                        "settlementId": settlement_id,
+                        **({"factionIds": [linked_faction]} if linked_faction is not None else {}),
+                    },
+                    rules.retention.player_threads,
+                )
+
+    @staticmethod
+    def _upsert_world_thread(
+        threads: list[dict[str, Any]],
+        update: dict[str, Any],
+        retention_limit: int,
+    ) -> None:
+        existing = next(
+            (
+                item for item in threads
+                if isinstance(item, dict) and item.get("id") == update["id"]
+            ),
+            None,
+        )
+        if existing is None:
+            threads.append(update)
+        else:
+            existing.update(update)
+        del threads[:-retention_limit]
 
     @staticmethod
     def apply_faction_relationship_changes(result: Any, action: StructuredAction) -> None:
@@ -403,6 +584,16 @@ class WorldTick:
     ) -> WorldState:
         state = copy.deepcopy(world_state.to_dict() if hasattr(world_state, "to_dict") else world_state)
         world = WorldState.from_dict(state)
+        prior_active_events = {
+            self._thread_event_signature(event)
+            for event in world.activeEvents
+            if isinstance(event, dict)
+        }
+        prior_internal_events = {
+            self._thread_event_signature(event)
+            for event in world.internalEvents
+            if isinstance(event, dict)
+        }
 
         if run_autopilot and self._has_active_policy(world):
             return self._advance_strategic_period(world, event_queue, hours, room_state=room_state)
@@ -551,6 +742,12 @@ class WorldTick:
 
         world.activeEvents.append({"type": "tick", "day": world.currentDay, "summary": "World tick processed."})
         self._trim_retained_collections(world)
+        self._sync_threads_for_new_world_events(
+            world,
+            room_state,
+            prior_active_events,
+            prior_internal_events,
+        )
         return world
 
     def _trim_retained_collections(self, world: WorldState) -> None:
@@ -814,6 +1011,7 @@ class WorldTick:
             world.activeEvents.append({
                 "type": "faction_action",
                 "day": world.currentDay,
+                "factionId": faction.get("id"),
                 "summary": f"{faction.get('name', faction.get('id', 'Faction'))} chose to {action}.",
                 "decisionFactors": copy.deepcopy(faction.get("lastDecisionFactors", {})),
                 "decisionInfluences": copy.deepcopy(faction.get("lastDecisionInfluences", {})),

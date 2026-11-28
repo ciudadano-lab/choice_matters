@@ -152,13 +152,13 @@ Then, on its own line, output exactly one fenced json block and nothing after it
   "strengths": ["..."],
   "weaknesses": ["..."],
   "characters_delta": [
-    { "id": "npc_arvind_rao", "name": "Dr. Arvind Rao", "traits": ["stubborn", "resourceful"], "status": "companion|encountered|departed|dead", "lastSeenDay": 1 }
+    { "npcId": "npc_arvind_rao", "knownFacts": { "met_at": "the clinic" }, "relationship": { "trust": 0.5 } }
   ],
   "recap_line": "one sentence capturing this round for future continuity"
 }
 ```
 
-In facts_delta, include ONLY the keys that actually changed this turn (omit unchanged ones entirely). In threads, include ONLY threads you are creating or updating this turn (omit threads that didn't change). The strengths and weaknesses arrays are optional and should be used only when genuinely applicable; include 0-3 short items each to justify why the survivalScore/ethicsScore deltas moved the way they did this turn. The characters_delta array is optional and should include only new or updated knownCharacters entries this turn, using the same structure as `entities.knownCharacters` in the player state. Always include recap_line."""
+In facts_delta, include ONLY the keys that actually changed this turn (omit unchanged ones entirely). In threads, include ONLY threads you are creating or updating this turn (omit threads that didn't change). The strengths and weaknesses arrays are optional and should be used only when genuinely applicable; include 0-3 short items each to justify why the survivalScore/ethicsScore deltas moved the way they did this turn. For a world NPC, characters_delta may contain only npcId, knownFacts, and relationship; never send a world NPC's name, traits, status, health, location, or other stats. Legacy player-only characters without npcId may keep their existing structure. Always include recap_line."""
 
 
 def fresh_room_state(seed: int | None = None):
@@ -207,11 +207,14 @@ def build_system_prompt(player_num: int, room_state: dict, interaction_target: i
         if isinstance(event, dict) and event.get("summary")
     ) if pending_events else "(none)"
     known_characters = st.get("entities", {}).get("knownCharacters", []) if isinstance(st.get("entities"), dict) else []
+    legacy_characters = [
+        char for char in known_characters
+        if isinstance(char, dict) and not char.get("npcId")
+    ]
     character_block = "\n".join(
         f"- {char.get('name', char.get('id', 'NPC'))} ({char.get('status', 'encountered')}; traits: {', '.join(char.get('traits', [])) or 'none'}; last seen day {char.get('lastSeenDay', '?')})"
-        for char in known_characters
-        if isinstance(char, dict)
-    ) if known_characters else "(none currently known)"
+        for char in legacy_characters
+    ) if legacy_characters else "(none currently known)"
     status_effects = st.get("statusEffects", []) if isinstance(st, dict) else []
     status_effects_block = "\n".join(
         f"- {effect.get('name', 'status effect')} (expires day {effect.get('expiresDay', '?')}; penalty: {effect.get('mechanicalEffect', {})})"

@@ -619,21 +619,50 @@ class SimulationEngine:
         if actor_player is None:
             return {}
 
+        actor_entities = actor_player.get("entities", {})
+        known = (
+            actor_entities.get("knownCharacters", [])
+            if isinstance(actor_entities, dict)
+            else []
+        )
+        known_reference = next(
+            (
+                item for item in known
+                if isinstance(item, dict)
+                and (
+                    str(item.get("npcId", "")) == str(target_id)
+                    or (
+                        not item.get("npcId")
+                        and str(item.get("id", "")) == str(target_id)
+                    )
+                )
+            ),
+            None,
+        )
         target_npc = None
-        for player in state.get("players", []):
-            if not isinstance(player, dict):
-                continue
-            known = player.get("entities", {}).get("knownCharacters", []) if isinstance(player.get("entities", {}), dict) else []
-            for npc in known:
-                if isinstance(npc, dict) and str(npc.get("id")) == str(target_id):
-                    target_npc = npc
-                    break
-            if target_npc is not None:
-                break
+        if isinstance(known_reference, dict) and known_reference.get("npcId"):
+            world_npcs = state.get("npcs", {})
+            target_npc = (
+                world_npcs.get(known_reference["npcId"])
+                if isinstance(world_npcs, dict)
+                else None
+            )
+            if isinstance(target_npc, dict) and target_npc.get("status") == "dead":
+                return {}
+        elif isinstance(known_reference, dict):
+            target_npc = known_reference
         if target_npc is None:
             return {}
 
-        relationship = actor_player.get("trustRelationships", {}).get(target_id, {})
+        reference_relationship = (
+            known_reference.get("relationship", {})
+            if isinstance(known_reference, dict)
+            else {}
+        )
+        relationship = actor_player.get("trustRelationships", {}).get(
+            target_id,
+            reference_relationship,
+        )
         relationship_value = float(relationship.get("trust", 0.5)) if isinstance(relationship, dict) else 0.5
         trait_names = {str(item).lower() for item in target_npc.get("traits", []) if isinstance(item, str)}
 

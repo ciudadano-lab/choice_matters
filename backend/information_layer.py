@@ -461,10 +461,40 @@ class InformationLayer:
             if isinstance(player_records, dict)
             else {}
         )
+        player = next(
+            (
+                item for item in state.get("players", [])
+                if isinstance(item, dict) and item.get("id") == player_id
+            ),
+            None,
+        )
+        entities = player.get("entities", {}) if isinstance(player, dict) else {}
+        references = entities.get("knownCharacters", []) if isinstance(entities, dict) else []
+        world_npcs = state.get("npcs", {})
+        known_npcs = []
+        if isinstance(world_npcs, dict) and isinstance(references, list):
+            seen_npc_ids: set[str] = set()
+            for reference in references:
+                if not isinstance(reference, dict):
+                    continue
+                npc_id = reference.get("npcId")
+                if not isinstance(npc_id, str) or npc_id in seen_npc_ids:
+                    continue
+                npc = world_npcs.get(npc_id)
+                if not isinstance(npc, dict):
+                    continue
+                seen_npc_ids.add(npc_id)
+                known_npcs.append({
+                    "id": npc_id,
+                    "name": npc.get("name", npc_id),
+                    "role": npc.get("role", "unknown"),
+                    "status": npc.get("status", "alive"),
+                })
         result: dict[str, Any] = {
             "seed": known_world.get("seed", state.get("seed")),
             "locations": [],
             "rumors": copy.deepcopy(known_world.get("rumors", [])),
+            "npcs": sorted(known_npcs, key=lambda npc: npc["id"]),
             "factions": self._project_entities(
                 state.get("factions", []),
                 player_record.get("factions", {}),
