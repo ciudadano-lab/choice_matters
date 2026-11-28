@@ -158,6 +158,18 @@ def narrate_simulation_result(
     else:
         lines.append(f"You perform {action.actionType}.")
 
+    policy = action.parameters.get("policy", {})
+    stripped_claim = policy.get("strippedClaim") if isinstance(policy, dict) else None
+    partial_feasibility = (
+        isinstance(policy, dict) and policy.get("_partialFeasibility") is True
+    )
+    if partial_feasibility:
+        claim_text = stripped_claim if isinstance(stripped_claim, str) and stripped_claim else "the claimed effect"
+        lines.append(
+            f"The claimed effect ({claim_text}) was not possible; "
+            "nothing supernatural happens."
+        )
+
     if result.timeConsumed:
         lines.append(f"This takes {result.timeConsumed} time unit{'s' if result.timeConsumed != 1 else ''}.")
 

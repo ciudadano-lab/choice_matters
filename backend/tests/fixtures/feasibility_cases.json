@@ -1,0 +1,38 @@
+{
+  "must-be-impossible": [
+    {"id": "meditation_superpowers", "input": "Meditate until I gain mind powers."},
+    {"id": "prayer_cure", "input": "Pray to cure the infection in my companion."},
+    {"id": "instant_mind_reading", "input": "Read the guard's mind instantly to learn the password."},
+    {"id": "resurrect_survivor", "input": "Resurrect the survivor who died yesterday."},
+    {"id": "cast_fire_spell", "input": "Cast a spell that lights the barricade on fire."},
+    {"id": "teleport_supply", "input": "Teleport the medicine directly into the shelter."},
+    {"id": "reverse_infection", "input": "Use a ritual to reverse the infection."},
+    {"id": "stop_time", "input": "Stop time so I can cross the street safely."},
+    {"id": "telepathy", "input": "Use telepathy to send a message to the watch."},
+    {"id": "bring_dead_back", "input": "Bring the dead dog back to life with magic."}
+  ],
+  "must-be-partial": [
+    {"id": "meditate_then_powers", "input": "Meditate to calm down and gain mind powers."},
+    {"id": "organize_supplies_cure", "input": "Sort the medicine shelves and pray to cure infection."},
+    {"id": "build_radio_to_dead", "input": "Build a radio mast so I can speak with the dead."},
+    {"id": "dog_training_telepathy", "input": "Train the dogs to bark at strangers and read their minds."},
+    {"id": "negotiate_telepathy", "input": "Negotiate with the watch using telepathy."},
+    {"id": "search_magic", "input": "Search the clinic for bandages and use magic to reveal hidden rooms."},
+    {"id": "fortify_spell", "input": "Fortify the shelter with scrap and cast a protection spell."},
+    {"id": "gather_teleport", "input": "Gather clean water and teleport it to the camp."},
+    {"id": "repair_resurrection", "input": "Repair the gate and resurrect the guard who died."},
+    {"id": "scout_mind_read", "input": "Scout the road and instantly read every stranger's mind."}
+  ],
+  "must-be-grounded": [
+    {"id": "scrap_armour_car", "input": "Wrap the car in scrap armour."},
+    {"id": "dogs_alarm", "input": "Train the dogs to bark when strangers approach."},
+    {"id": "quarantine_monitor", "input": "Quarantine the sick survivor and monitor symptoms."},
+    {"id": "meditate_calm", "input": "Meditate to calm down before the meeting."},
+    {"id": "rainwater_filter", "input": "Build a rainwater filter from sand, cloth, and charcoal."},
+    {"id": "door_alarm", "input": "Rig empty cans on a cord as a door alarm."},
+    {"id": "bike_generator", "input": "Turn a bicycle into a hand-powered phone charger."},
+    {"id": "smoke_signal", "input": "Use a controlled smoke signal to contact the nearby group."},
+    {"id": "wound_cleaning", "input": "Clean the wound and watch for signs of infection."},
+    {"id": "scrap_barricade", "input": "Reinforce the windows with salvaged sheet metal."}
+  ]
+}

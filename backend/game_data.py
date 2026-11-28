@@ -13,6 +13,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from world_state import WorldState, assign_spawn_to_player
+from world_rules import render_world_rules
 from action_registry import get_live_action_ids
 
 VALID_PLAYERS = [1, 2, 3]
@@ -125,7 +126,6 @@ PLAYER_SEEDS = {
 
 SHARED_RULES = """CORE RULES — follow all of these:
 STRATEGIC CADENCE: The default strategic period is 21 days (three weeks). Treat each policy decision as a commitment whose effects and consequences unfold across that period. Tactical actions remain valid during the Phase A transition, but prefer policy-level dilemmas when the player is choosing how the settlement should allocate effort, manage relationships, invest, govern, or develop a named character.
-WORLD PHYSICS: This is a grounded, non-supernatural outbreak setting. Mark only magic, superpowers, physics-defying feats, or a claimed CURE/REVERSAL of the infection as impossible. Detecting, observing, or verifying infection status through mundane means (quarantine, symptom-watching, time) is always grounded, never impossible — do not confuse "checking for infection" with "curing infection."
 1. Continuity over novelty. Before inventing a new crisis, do a quick synthesis pass across the accumulated ingredients in this room: the open threads, the recent worldContext/worldEra developments, the player's existing knownCharacters roster, and the player's own recent outcome or unresolved consequence. If two or more of those elements plausibly intersect, build the next dilemma at that intersection instead of advancing a single thread in isolation. This is the preferred pattern: a choice that ties together a personal stake, a world event, and/or a named relationship produces the most coherent and memorable scenario. A delayed consequence is not a separate genre; it is the main mechanism of continuity. Planting a thread with status: "open" and a concrete stakes line is how you set up a future payoff. When a previously open or dormant thread is the natural payoff for what is happening this turn (an NPC returns with a follow-up offer, a rival faction acts on something learned earlier, a debt comes due), resolving that thread should take priority over inventing an unrelated new complication. Isolated single-thread nudges are the fallback when nothing genuinely intersects; they are not the default. You may still introduce new complications, but the default should be synthesis over novelty, with a clear reason when a scene stays narrow.
 2. No plot armor. If a decision leads to death, failure, or loss, it happens for real and stays real in future turns. Never retroactively soften an outcome.
 3. Score every decision on two INDEPENDENT axes, 0-10 each:
@@ -250,6 +250,7 @@ def build_system_prompt(player_num: int, room_state: dict, interaction_target: i
     return f"""You are the narrator and game master of a zombie-apocalypse sandbox survival simulation. You are running the storyline for {seed['displayName']}, who is {seed['philosophy']} The default strategic period is {STRATEGIC_PERIOD_DAYS} days (three weeks); policy decisions represent commitments whose consequences unfold over that period. Tactical actions remain valid during the transition. It has been only a few days since the outbreak began; the undead are still the most immediate threat, but resource scarcity and other survivors will matter increasingly as time goes on.
 
 {SHARED_RULES}
+{render_world_rules()}
 CURRENT FACTS:
 Day {f['day']} · Location: {f['location']} · Population: {f['population']} · Survival Score: {f['survivalScore']} · Ethics Score: {f['ethicsScore']}{local_context}
 

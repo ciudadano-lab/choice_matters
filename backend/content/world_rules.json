@@ -1,0 +1,77 @@
+{
+  "physics_statement": "This is a grounded, non-supernatural outbreak setting. Resolve actions through ordinary human abilities, available tools, and plausible physical consequences.",
+  "impossible_categories": [
+    {
+      "id": "magic",
+      "description": "Magic or supernatural forces",
+      "match_terms": ["magic", "spell", "sorcery", "witchcraft", "cast a spell"]
+    },
+    {
+      "id": "superpowers",
+      "description": "Superpowers or abilities beyond ordinary human limits",
+      "match_terms": ["superpower", "mind powers", "telekinesis", "teleport", "fly unaided", "superhuman strength"]
+    },
+    {
+      "id": "physics_defying",
+      "description": "Feats that defy established physical limits",
+      "match_terms": ["walk through walls", "stop time", "survive in space without protection", "lift a building"]
+    },
+    {
+      "id": "infection_cure_or_reversal",
+      "description": "A claimed cure or reversal of the infection",
+      "match_terms": ["cure the infection", "cure infection", "reverse the infection", "reverse infection", "undo the infection"]
+    },
+    {
+      "id": "instant_mind_reading",
+      "description": "Instant mind-reading or telepathy",
+      "match_terms": ["read their mind", "read minds", "read the guard's mind", "mind-reading", "mind reading", "telepathy", "know their thoughts"]
+    },
+    {
+      "id": "resurrection",
+      "description": "Resurrection or bringing the dead back to life",
+      "match_terms": ["resurrect", "bring them back to life", "bring back the dead", "raise the dead"]
+    }
+  ],
+  "examples": [
+    {
+      "classification": "grounded",
+      "request": "Wrap a car in scrap armour.",
+      "explanation": "A demanding but physically plausible construction task."
+    },
+    {
+      "classification": "grounded",
+      "request": "Train dogs to bark when strangers approach.",
+      "explanation": "Ordinary animal training used as an alarm."
+    },
+    {
+      "classification": "grounded",
+      "request": "Quarantine a sick survivor and monitor symptoms.",
+      "explanation": "Mundane observation does not claim to cure infection."
+    },
+    {
+      "classification": "grounded",
+      "request": "Meditate to calm down.",
+      "explanation": "A realistic action with ordinary stress-management effects."
+    },
+    {
+      "classification": "impossible",
+      "request": "Meditate to gain mind powers.",
+      "explanation": "Meditation cannot grant supernatural abilities."
+    },
+    {
+      "classification": "impossible",
+      "request": "Pray to cure the infection.",
+      "explanation": "The request claims a supernatural cure or reversal."
+    },
+    {
+      "classification": "impossible",
+      "request": "Read a stranger's thoughts instantly.",
+      "explanation": "Instant mind-reading is not possible in this setting."
+    },
+    {
+      "classification": "impossible",
+      "request": "Resurrect a dead survivor.",
+      "explanation": "Death cannot be reversed by supernatural means."
+    }
+  ]
+}

@@ -40,9 +40,12 @@ from simulation_engine import SimulationEngine, StructuredAction
 from world_state import WorldState
 from world_tick import WorldTick, WorldEventQueue
 from world_content import load_world_content
+from world_rules import load_world_rules, render_world_rules
 from ws_manager import manager
 
 load_backend_env()
+
+MAX_STRIPPED_CLAIM_LENGTH = 240
 
 app = FastAPI(title="Zombie Sandbox Online")
 
@@ -63,7 +66,12 @@ def _apply_live_action(
     world_state: Any,
     action: StructuredAction,
 ) -> Any:
-    result = engine.apply(world_state, action, rules="current")
+    engine_action = copy.deepcopy(action)
+    policy = engine_action.parameters.get("policy")
+    if isinstance(policy, dict):
+        policy.pop("strippedClaim", None)
+        policy.pop("_partialFeasibility", None)
+    result = engine.apply(world_state, engine_action, rules="current")
     WorldTick(seed=engine.seed).apply_faction_relationship_changes(result, action)
     InformationLayer().record_action_discoveries(
         result.updatedWorldState,
@@ -84,6 +92,7 @@ def _log_player_command_parse(
     action: StructuredAction,
     fallback_used: bool,
     fallback_reason: str | None,
+    feasibility: str = "grounded",
 ) -> None:
     record = {
         "event": "player_command_parse",
@@ -104,6 +113,7 @@ def _log_player_command_parse(
         },
         "fallback_used": fallback_used,
         "fallback_reason": fallback_reason,
+        "feasibility": feasibility,
     }
     append_debug_log(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
 
@@ -567,7 +577,7 @@ Active status effects:
 {status_effects_block}
 Pending events for this player:
 {pending_events_block}
-WORLD PHYSICS: This is a grounded, non-supernatural outbreak setting. Mark only magic, superpowers, physics-defying feats, or a claimed CURE/REVERSAL of the infection as impossible. Detecting, observing, or verifying infection status through mundane means (quarantine, symptom-watching, time) is always grounded, never impossible — do not confuse "checking for infection" with "curing infection."
+{render_world_rules()}
 Open threads:\n{thread_block}.{interaction_context}
 
 Player input:
@@ -580,7 +590,16 @@ Return exactly one fenced JSON code block and nothing else. The block must conta
     "actionType": "{action_types}",
   "actor": "{actor_id}",
   "target": "string",
-    "feasibility": "grounded|impossible",
+    "feasibility": "grounded|partial|impossible",
+    "strippedClaim": "optional; the impossible part, only when feasibility is partial",
+    "groundedAction": {{
+        "actionType": "policy category",
+        "target": "string",
+        "policy": {{ "focus": "grounded action only", "commitmentDays": {STRATEGIC_PERIOD_DAYS} }},
+        "planFeatures": {{ "timing": "unspecified", "approach": "unspecified" }},
+        "timeCost": 1,
+        "resourceCost": {{}}
+    }},
     "parameters": {{
         "targetEntity": null
     }},
@@ -600,44 +619,131 @@ Return exactly one fenced JSON code block and nothing else. The block must conta
 ```
 Include `targetEntity` only when the action specifically names another player's companion or possession; otherwise omit it entirely or leave it `null`. Never emit an empty placeholder object for an action without an entity claim.
 Use `policy.focus` to state the concrete priority or stance and `policy.commitmentDays` for the intended commitment length. Use `policy.pivotalTiming` as `immediate` when the focus describes an action happening right away, such as attacking or traveling immediately. Use `culmination` when the focus describes building toward an outcome over the commitment, such as gathering resources before founding a settlement. When ambiguous, use `culmination`. Use only the available location ids for the target.
+Use feasibility `grounded` for wholly plausible requests and `impossible` when the requested effect itself is impossible. Use `partial` only when the request contains both a plausible action and an impossible claim. For `partial`, `groundedAction` is REQUIRED and must contain only the plausible action, with a policy focus that excludes the impossible claim; set `strippedClaim` to that excluded claim. If no meaningful grounded action remains, use `impossible`.
 For planFeatures: Facts only. List only what the player's text explicitly says; Do NOT judge or score the plan. Use [] / false / "unspecified" when something is not stated. targetLocationIds must come from the available location ids.
 Do not include any explanation, narrative, or text before or after the fenced JSON block."""
 
 
-def _build_action_from_payload(payload: Any) -> tuple[StructuredAction | None, str | None]:
+def _resolve_payload_feasibility(
+    payload: Any,
+    player_text: str | None = None,
+) -> str:
+    if not isinstance(payload, dict):
+        return "grounded"
+    value = str(payload.get("feasibility", "grounded")).strip().casefold()
+    if value in {"grounded", "partial", "impossible"}:
+        return value
+    evidence = " ".join(
+        str(item)
+        for item in (player_text, payload.get("strippedClaim"))
+        if item
+    )
+    return "impossible" if load_world_rules().matches_impossible_claim(evidence) else "grounded"
+
+
+def _sanitize_stripped_claim(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    cleaned = "".join(
+        character if character.isprintable() else " "
+        for character in value
+    )
+    cleaned = " ".join(cleaned.replace("```", "").split())
+    return cleaned[:MAX_STRIPPED_CLAIM_LENGTH].strip()
+
+
+def _impossible_action(payload: dict[str, Any]) -> StructuredAction:
+    return StructuredAction(
+        actionId=str(payload.get("actionId", "impossible-claim")),
+        actionType="failed_attempt",
+        actor=str(payload.get("actor", "")),
+        target=str(payload.get("target", "")),
+        parameters={
+            "physicallyImpossible": True,
+            "claimedActionType": str(payload.get("actionType", "unknown")),
+        },
+        timeCost=max(0, int(payload.get("timeCost", 1))),
+    )
+
+
+def _build_action_from_payload(
+    payload: Any,
+    *,
+    player_text: str | None = None,
+) -> tuple[StructuredAction | None, str | None]:
     if not isinstance(payload, dict):
         return None, "AI parse returned invalid JSON payload."
     try:
-        feasibility = str(payload.get("feasibility", "grounded")).casefold()
+        feasibility = _resolve_payload_feasibility(payload, player_text)
         if feasibility == "impossible":
-            return StructuredAction(
-                actionId=str(payload["actionId"]),
-                actionType="failed_attempt",
-                actor=str(payload["actor"]),
-                target=str(payload.get("target", "")),
-                parameters={
-                    "physicallyImpossible": True,
-                    "claimedActionType": str(payload.get("actionType", "unknown")),
-                },
-                timeCost=max(0, int(payload.get("timeCost", 1))),
-            ), None
-        action_type = str(payload["actionType"]).strip().casefold()
+            return _impossible_action(payload), None
+        if feasibility == "partial":
+            grounded = payload.get("groundedAction")
+            if not isinstance(grounded, dict):
+                return _impossible_action(payload), None
+            action_type_value = grounded.get("actionType")
+            target_value = grounded.get("target")
+            grounded_policy = grounded.get("policy")
+            if (
+                not isinstance(action_type_value, str)
+                or action_type_value.strip().casefold() not in POLICY_ACTION_TYPES
+                or not isinstance(target_value, str)
+                or not target_value.strip()
+                or not isinstance(grounded_policy, dict)
+                or not isinstance(grounded_policy.get("focus"), str)
+                or not grounded_policy["focus"].strip()
+            ):
+                return _impossible_action(payload), None
+            action_payload = {
+                **payload,
+                "actionType": action_type_value,
+                "target": target_value,
+                "policy": grounded_policy,
+                "parameters": grounded.get("parameters", {}),
+                "planFeatures": grounded.get(
+                    "planFeatures",
+                    payload.get("planFeatures"),
+                ),
+                "timeCost": grounded.get("timeCost", payload.get("timeCost", 1)),
+                "resourceCost": grounded.get(
+                    "resourceCost",
+                    payload.get("resourceCost", {}),
+                ),
+            }
+        else:
+            action_payload = payload
+
+        action_type = str(action_payload["actionType"]).strip().casefold()
         if action_type not in POLICY_ACTION_TYPES:
             return None, "Player-facing actions must use a strategic policy category."
-        parameters = payload.get("parameters")
+        parameters = action_payload.get("parameters")
         if not isinstance(parameters, dict):
             parameters = {}
         parameters = {
             key: value
             for key, value in parameters.items()
-            if key not in {"seed", "planQuality", "planFeatures"}
+            if key not in {
+                "seed",
+                "planQuality",
+                "planFeatures",
+                "physicallyImpossible",
+                "strippedClaim",
+                "claimedActionType",
+            }
         }
-        raw_policy = payload.get("policy")
+        raw_policy = action_payload.get("policy")
         if not isinstance(raw_policy, dict):
             raw_policy = parameters.get("policy")
         policy = dict(raw_policy) if isinstance(raw_policy, dict) else {}
         policy.pop("planFeatures", None)
-        plan_features = PlanFeatures.from_untrusted(payload.get("planFeatures"))
+        policy.pop("strippedClaim", None)
+        policy.pop("_partialFeasibility", None)
+        if feasibility == "partial":
+            stripped_claim = _sanitize_stripped_claim(payload.get("strippedClaim"))
+            policy["_partialFeasibility"] = True
+            if stripped_claim:
+                policy["strippedClaim"] = stripped_claim
+        plan_features = PlanFeatures.from_untrusted(action_payload.get("planFeatures"))
         if plan_features is not None:
             policy["planFeatures"] = plan_features.to_dict()
         if policy or plan_features is not None:
@@ -647,10 +753,10 @@ def _build_action_from_payload(payload: Any) -> tuple[StructuredAction | None, s
                 actionId=str(payload["actionId"]),
                 actionType=action_type,
                 actor=str(payload["actor"]),
-                target=str(payload["target"]),
+                target=str(action_payload["target"]),
                 parameters=parameters,
-                timeCost=int(payload.get("timeCost", 1)),
-                resourceCost={k: int(v) for k, v in (payload.get("resourceCost") or {}).items()},
+                timeCost=int(action_payload.get("timeCost", 1)),
+                resourceCost={k: int(v) for k, v in (action_payload.get("resourceCost") or {}).items()},
             ),
             None,
         )
@@ -725,6 +831,41 @@ def _parse_json_payload(raw_text: str) -> Any:
         return None
 
 
+async def _parse_action_with_llm(
+        player_num: int,
+        actor_id: str,
+        room_state: dict[str, Any],
+        user_text: str,
+        interaction_target: int | None = None,
+) -> tuple[StructuredAction | None, str | None, str | None, str, str | None]:
+        prompt = _build_ai_action_parse_prompt(
+            player_num,
+            actor_id,
+            room_state,
+            user_text,
+            interaction_target=interaction_target,
+        )
+        try:
+            raw_response = await call_narrator(prompt, "", purpose="parse")
+        except RuntimeError as error:
+            return (
+                None,
+                str(error),
+                getattr(error, "raw_response", None),
+                "grounded",
+                getattr(error, "raw_response", None),
+            )
+        payload = _parse_json_payload(raw_response)
+        feasibility = _resolve_payload_feasibility(payload, user_text)
+        action, parse_error = _build_action_from_payload(
+            payload,
+            player_text=user_text,
+        )
+        if feasibility == "partial" and action is not None and action.actionType == "failed_attempt":
+            feasibility = "impossible"
+        return action, parse_error, raw_response, feasibility, None
+
+
 def _build_ai_narration_prompt(player_num: int, room_state: dict, action: StructuredAction, result: Any, user_text: str, interaction_target: int | None = None) -> str:
     base_prompt = build_system_prompt(player_num, room_state, interaction_target=interaction_target)
     actor_id = f"player_{player_num}"
@@ -762,6 +903,17 @@ def _build_ai_narration_prompt(player_num: int, room_state: dict, action: Struct
         "Reuse these entity ids exactly. Do not contradict a listed status. Never kill, move, or re-stat a world NPC; only simulation engine events can change a world NPC.",
     ])
     action_parameters = {k: v for k, v in action.parameters.items() if v}
+    action_policy = action_parameters.get("policy")
+    stripped_claim = ""
+    is_partial = False
+    if isinstance(action_policy, dict):
+        action_policy = dict(action_policy)
+        is_partial = action_policy.pop("_partialFeasibility", False) is True
+        stripped_claim = _sanitize_stripped_claim(action_policy.pop("strippedClaim", ""))
+        if action_policy:
+            action_parameters["policy"] = action_policy
+        else:
+            action_parameters.pop("policy", None)
     action_params_text = "" if not action_parameters else f"Parameters: {action_parameters}\n"
     result_lines = [
         f"timeConsumed: {result.timeConsumed}",
@@ -804,6 +956,13 @@ def _build_ai_narration_prompt(player_num: int, room_state: dict, action: Struct
             )
     result_summary = "\n".join(result_lines)
     prompt_lines = []
+    if is_partial:
+        claim_text = stripped_claim or "the claimed effect"
+        prompt_lines.append(
+            f"PARTIAL FEASIBILITY: The claimed effect was NOT possible: {claim_text}. "
+            "Nothing supernatural happens. Narrate only the grounded action and its "
+            "simulation outcome; do not narrate or apply the stripped claim."
+        )
     if result.physicallyImpossible:
         prompt_lines.append(
             "THIS ACTION WAS REJECTED AS PHYSICALLY IMPOSSIBLE. You MUST narrate it "
@@ -1242,13 +1401,11 @@ async def _process_decision(room_code: str, websocket: WebSocket, msg: dict):
     actor_id = f"player_{slot}"
     snapshot_world = WorldState.from_room_state(snapshot)
     snapshot_player = snapshot["players"][str(slot)]
-    ai_parse_prompt = _build_ai_action_parse_prompt(
-        slot, actor_id, snapshot, text, interaction_target=target_slot
-    )
     action = None
     parse_error = None
-    parse_raw_response = None
     raw_parse_response = None
+    exception_raw_response = None
+    parse_feasibility = "grounded"
     if text.casefold() == "wait and observe":
         action = StructuredAction(
             actionId=f"wait-and-observe-{slot}-{snapshot.get('roundNumber', 1)}",
@@ -1264,14 +1421,19 @@ async def _process_decision(room_code: str, websocket: WebSocket, msg: dict):
             },
         )
     else:
-        try:
-            raw_parse_response = await call_narrator(ai_parse_prompt, "", purpose="parse")
-            payload = _parse_json_payload(raw_parse_response)
-            action, parse_error = _build_action_from_payload(payload)
-        except RuntimeError as exc:
-            parse_error = str(exc)
-            parse_raw_response = getattr(exc, "raw_response", None)
-            raw_parse_response = parse_raw_response
+        (
+            action,
+            parse_error,
+            raw_parse_response,
+            parse_feasibility,
+            exception_raw_response,
+        ) = await _parse_action_with_llm(
+            slot,
+            actor_id,
+            snapshot,
+            text,
+            interaction_target=target_slot,
+        )
 
     fallback_used = False
     fallback_reason = None
@@ -1300,6 +1462,7 @@ async def _process_decision(room_code: str, websocket: WebSocket, msg: dict):
         action,
         fallback_used,
         fallback_reason,
+        feasibility=parse_feasibility,
     )
 
     summary_text = None
@@ -1412,8 +1575,8 @@ async def _process_decision(room_code: str, websocket: WebSocket, msg: dict):
         unknown_note = check_unknown_mention(text)
         if unknown_note:
             player_state["log"].append({"role": "system", "text": unknown_note})
-        if parse_raw_response:
-            player_state["log"].append({"role": "system", "text": f"RAW_LLM_RESPONSE: {parse_raw_response}"})
+        if exception_raw_response:
+            player_state["log"].append({"role": "system", "text": f"RAW_LLM_RESPONSE: {exception_raw_response}"})
         if fallback_used:
             player_state["log"].append({"role": "system", "text": "AI parse didn't match the expected action schema; using a generic policy fallback."})
 

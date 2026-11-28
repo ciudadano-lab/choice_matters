@@ -28,6 +28,9 @@ def test_phase_a_prompt_exposes_policy_taxonomy_and_strategic_cadence():
     assert '"pivotalTiming": "immediate|culmination"' in prompt
     assert "When ambiguous, use `culmination`" in prompt
     assert "travel|search|gather" not in prompt
+    assert '"feasibility": "grounded|partial|impossible"' in prompt
+    assert "groundedAction" in prompt
+    assert "Instant mind-reading or telepathy" in prompt
 
 
 def test_phase_a_policy_payload_is_preserved_in_action_parameters():
@@ -147,6 +150,7 @@ def test_player_command_parse_log_is_one_json_line_with_complete_details(monkeyp
         action,
         True,
         "AI parse returned invalid JSON payload.",
+        feasibility="partial",
     )
 
     assert len(log_lines) == 1
@@ -157,6 +161,154 @@ def test_player_command_parse_log_is_one_json_line_with_complete_details(monkeyp
     assert record["action_used"]["parameters"]["policy"]["focus"] == "barricade the door"
     assert record["fallback_used"] is True
     assert record["fallback_reason"] == "AI parse returned invalid JSON payload."
+    assert record["feasibility"] == "partial"
+
+
+def test_stubbed_partial_parse_runs_only_the_grounded_policy_and_informs_narrator(monkeypatch):
+    import asyncio
+
+    from main import _apply_live_action, _build_ai_narration_prompt, _parse_action_with_llm
+    from simulation_engine import SimulationEngine, SimulationResult
+    from world_state import WorldState
+
+    room = fresh_room_state(seed=414)
+    world = WorldState.from_dict(room["world_state"])
+    payload = {
+        "actionId": "partial-meditation",
+        "actionType": "personal_development",
+        "actor": "player_1",
+        "target": "settlement",
+        "feasibility": "partial",
+        "strippedClaim": "gain mind powers\n```bad```",
+        "groundedAction": {
+            "actionType": "personal_development",
+            "target": "settlement",
+            "policy": {
+                "focus": "rest and recover",
+                "commitmentDays": 21,
+                "pivotalTiming": "immediate",
+            },
+            "timeCost": 1,
+            "resourceCost": {},
+        },
+    }
+    raw_response = f"```json\n{json.dumps(payload)}\n```"
+    captured_prompts = []
+
+    async def stub_narrator(prompt, _user_text, *, purpose):
+        assert purpose == "parse"
+        assert _user_text == ""
+        captured_prompts.append(prompt)
+        return raw_response
+
+    monkeypatch.setattr(main, "call_narrator", stub_narrator)
+    action, error, raw, feasibility, exception_raw = asyncio.run(
+        _parse_action_with_llm(
+            1,
+            "player_1",
+            room,
+            "Meditate to calm down and gain mind powers.",
+        )
+    )
+
+    assert error is None
+    assert raw == raw_response
+    assert exception_raw is None
+    assert feasibility == "partial"
+    assert action is not None
+    assert action.actionType == "personal_development"
+    assert action.parameters["policy"]["focus"] == "rest and recover"
+    assert action.parameters["policy"]["strippedClaim"] == "gain mind powers bad"
+    assert len(action.parameters["policy"]["strippedClaim"]) <= 240
+    assert "groundedAction" in captured_prompts[0]
+    assert "WORLD PHYSICS:" in captured_prompts[0]
+
+    result = _apply_live_action(SimulationEngine(seed=414), world, action)
+    clean_action = copy.deepcopy(action)
+    clean_policy = clean_action.parameters["policy"]
+    clean_policy.pop("strippedClaim")
+    clean_policy.pop("_partialFeasibility")
+    clean_result = _apply_live_action(
+        SimulationEngine(seed=414),
+        world,
+        clean_action,
+    )
+    assert result.encounterProbability == clean_result.encounterProbability
+    assert result.rollLog == clean_result.rollLog
+    assert result.updatedWorldState == clean_result.updatedWorldState
+    result_world = WorldState.from_dict(result.updatedWorldState)
+    stored_policy = result_world.players[0]["currentPolicy"]
+    assert "strippedClaim" not in stored_policy
+    assert "_partialFeasibility" not in stored_policy
+
+    narration_result = SimulationResult(
+        actionId=action.actionId,
+        actionType=action.actionType,
+        timeConsumed=0,
+        resourceChanges={},
+        playerStatusChanges=[],
+        locationChanges=[],
+        encounterProbability=0.0,
+        encounterOccurred=False,
+        encounterDetails={},
+        factionRelationshipChanges=[],
+        informationDiscovered=[],
+        worldEventsTriggered=[],
+        updatedWorldState=result.updatedWorldState,
+    )
+    narration_prompt = _build_ai_narration_prompt(
+        1,
+        room,
+        action,
+        narration_result,
+        "Meditate to calm down.",
+    )
+    assert "claimed effect was NOT possible" in narration_prompt
+    assert "Nothing supernatural happens" in narration_prompt
+    assert "gain mind powers" in narration_prompt
+    assert "strippedClaim" not in narration_prompt.split("STRUCTURED ACTION:", 1)[1].split(
+        "SIMULATION RESULT:", 1
+    )[0]
+
+
+def test_partial_without_usable_grounded_action_becomes_impossible():
+    action, error = _build_action_from_payload({
+        "actionId": "partial-without-action",
+        "actionType": "personal_development",
+        "actor": "player_1",
+        "target": "settlement",
+        "feasibility": "partial",
+        "strippedClaim": "gain superpowers",
+    })
+
+    assert error is None
+    assert action is not None
+    assert action.actionType == "failed_attempt"
+    assert action.parameters["physicallyImpossible"] is True
+
+
+def test_unknown_feasibility_uses_world_rules_to_choose_safe_fallback():
+    payload = {
+        "actionId": "unknown-feasibility",
+        "actionType": "personal_development",
+        "actor": "player_1",
+        "target": "settlement",
+        "policy": {"focus": "meditate"},
+        "feasibility": "maybe",
+    }
+    impossible, error = _build_action_from_payload(
+        payload,
+        player_text="Pray to cure the infection.",
+    )
+    grounded, grounded_error = _build_action_from_payload(
+        payload,
+        player_text="Wrap a car in scrap armour.",
+    )
+
+    assert error is None
+    assert impossible is not None and impossible.actionType == "failed_attempt"
+    assert grounded_error is None
+    assert grounded is not None and grounded.actionType == "personal_development"
 
 
 def test_system_prompt_includes_compressed_story_summary():
