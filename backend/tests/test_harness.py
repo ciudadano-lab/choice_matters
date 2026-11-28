@@ -9,6 +9,7 @@ from simulation_engine import StructuredAction
 from world_state import generate_initial_world_state
 from tools.harness import (
     BOT_NAMES,
+    _aggregate_stance_distributions,
     _check_determinism,
     _known_location_ids,
     _owned_item_ids,
@@ -215,6 +216,54 @@ def test_world_sim_acceptance_report_builds_and_saves_pass_warn_table(tmp_path):
     assert "scenario,target,observed,criterion,status" in (
         tmp_path / "world_sim_acceptance.csv"
     ).read_text(encoding="utf-8")
+
+
+def test_acceptance_warns_when_stance_distribution_never_changes():
+    distribution, changed = _aggregate_stance_distributions(
+        [{
+            "daily": [
+                {
+                    "elapsed_day": day,
+                    "stance_distribution": {
+                        "allied": 0,
+                        "friendly": 1,
+                        "neutral": 0,
+                        "wary": 0,
+                        "hostile": 0,
+                        "war": 0,
+                    },
+                }
+                for day in (30, 60, 100)
+            ],
+        }],
+        days=100,
+    )
+
+    assert not changed
+    assert tuple(distribution) == (30, 60, 100)
+
+
+def test_acceptance_detects_stance_distribution_changes_between_checkpoints():
+    runs = [{
+        "daily": [
+            {
+                "elapsed_day": 30,
+                "stance_distribution": {"friendly": 1},
+            },
+            {
+                "elapsed_day": 60,
+                "stance_distribution": {"hostile": 1},
+            },
+            {
+                "elapsed_day": 100,
+                "stance_distribution": {"hostile": 1},
+            },
+        ],
+    }]
+
+    _, changed = _aggregate_stance_distributions(runs, days=100)
+
+    assert changed
 
 
 def test_encounter_outcome_target_checks_report_prepared_and_unprepared_bands(capsys):

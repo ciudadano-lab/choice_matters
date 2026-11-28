@@ -3,7 +3,7 @@ import copy
 import pytest
 from pydantic import ValidationError
 
-from world_content import FactionSeed, load_world_content
+from world_content import FactionSeed, FactionStanceRules, load_world_content
 from world_state import WorldState, generate_initial_world_state, normalize_settlement_record
 
 
@@ -38,6 +38,16 @@ def test_world_content_is_strict_and_references_are_valid():
             "leader_npc_id": "npc_missing",
             "council_seats": 0,
             "unexpected": True,
+        })
+
+
+def test_faction_stance_threshold_content_must_be_ordered():
+    rules = load_world_content().faction_rules.stances.model_dump()
+
+    with pytest.raises(ValidationError, match="thresholds must descend"):
+        FactionStanceRules.model_validate({
+            **rules,
+            "friendly_min": rules["allied_min"],
         })
 
 

@@ -89,5 +89,16 @@
       "control_trade_routes": "trade",
       "protect_civilians": "negotiate"
     }
+  },
+  "stances": {
+    "monthly_interval_days": 30,
+    "allied_min": 60,
+    "friendly_min": 20,
+    "neutral_min": -19,
+    "wary_min": -49,
+    "hostile_min": -79,
+    "war_max": -80,
+    "hysteresis_margin": 5,
+    "war_requires_aggression_days": 30
   }
 }

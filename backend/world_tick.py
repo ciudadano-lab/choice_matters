@@ -979,7 +979,10 @@ class WorldTick:
     def _simulate_factions(self, world: WorldState, hours: int, event_queue: WorldEventQueue | None = None) -> None:
         if not world.factions:
             return
-        if world.currentDay % load_world_content().faction_rules.decisions.interval_days != 0:
+        faction_rules = load_world_content().faction_rules
+        weekly_due = world.currentDay % faction_rules.decisions.interval_days == 0
+        monthly_due = world.currentDay % faction_rules.stances.monthly_interval_days == 0
+        if not weekly_due and not monthly_due:
             return
 
         factions = sorted(
@@ -990,40 +993,42 @@ class WorldTick:
             key=lambda faction: str(faction.get("id", "")),
         )
         for faction in factions:
-            if not isinstance(faction, dict):
-                continue
             self._normalize_faction(faction)
-            action = self._choose_faction_action(world, faction, hours)
-            self._apply_faction_action(world, faction, action, hours, event_queue=event_queue)
-            recent_actions = faction.setdefault("recentActions", [])
-            if not isinstance(recent_actions, list):
-                recent_actions = []
-                faction["recentActions"] = recent_actions
-            recent_actions.append(action)
-            faction["recentActions"] = recent_actions[-3:]
-            faction["lastAction"] = action
-            faction["lastDecisionDay"] = world.currentDay
-            faction["lastDecisionTarget"] = self._select_player_decision_target(
-                world,
-                faction,
-                action,
-            )
-            world.activeEvents.append({
-                "type": "faction_action",
-                "day": world.currentDay,
-                "factionId": faction.get("id"),
-                "summary": f"{faction.get('name', faction.get('id', 'Faction'))} chose to {action}.",
-                "decisionFactors": copy.deepcopy(faction.get("lastDecisionFactors", {})),
-                "decisionInfluences": copy.deepcopy(faction.get("lastDecisionInfluences", {})),
-                "target": copy.deepcopy(faction.get("lastDecisionTarget")),
-            })
-            if action in {"attack", "raid_settlements", "split_into_new_factions", "collapse"}:
-                append_world_history_event(world, {
+        if weekly_due:
+            for faction in factions:
+                action = self._choose_faction_action(world, faction, hours)
+                self._apply_faction_action(world, faction, action, hours, event_queue=event_queue)
+                recent_actions = faction.setdefault("recentActions", [])
+                if not isinstance(recent_actions, list):
+                    recent_actions = []
+                    faction["recentActions"] = recent_actions
+                recent_actions.append(action)
+                faction["recentActions"] = recent_actions[-3:]
+                faction["lastAction"] = action
+                faction["lastDecisionDay"] = world.currentDay
+                faction["lastDecisionTarget"] = self._select_player_decision_target(
+                    world,
+                    faction,
+                    action,
+                )
+                world.activeEvents.append({
                     "type": "faction_action",
-                    "description": f"{faction.get('name', faction.get('id', 'Faction'))} performed {action}.",
                     "day": world.currentDay,
-                    "timestamp": world.currentDay,
+                    "factionId": faction.get("id"),
+                    "summary": f"{faction.get('name', faction.get('id', 'Faction'))} chose to {action}.",
+                    "decisionFactors": copy.deepcopy(faction.get("lastDecisionFactors", {})),
+                    "decisionInfluences": copy.deepcopy(faction.get("lastDecisionInfluences", {})),
+                    "target": copy.deepcopy(faction.get("lastDecisionTarget")),
                 })
+                if action in {"attack", "raid_settlements", "split_into_new_factions", "collapse"}:
+                    append_world_history_event(world, {
+                        "type": "faction_action",
+                        "description": f"{faction.get('name', faction.get('id', 'Faction'))} performed {action}.",
+                        "day": world.currentDay,
+                        "timestamp": world.currentDay,
+                    })
+        if monthly_due:
+            self._update_faction_stances(world, event_queue)
 
     def _normalize_faction(self, faction: dict[str, Any]) -> None:
         territory = faction.setdefault("territory", [])
@@ -1035,6 +1040,192 @@ class WorldTick:
         faction.setdefault("ideology", "survival")
         faction.setdefault("goals", [])
         faction.setdefault("relationships", {})
+        faction.setdefault("stances", {})
+        faction.setdefault("lastAggressionByFaction", {})
+
+    def _derive_faction_stance(
+        self,
+        disposition: int,
+        current_stance: str | None,
+        recent_aggression: bool,
+    ) -> str:
+        rules = load_world_content().faction_rules.stances
+        if disposition >= rules.allied_min:
+            candidate = "allied"
+        elif disposition >= rules.friendly_min:
+            candidate = "friendly"
+        elif disposition >= rules.neutral_min:
+            candidate = "neutral"
+        elif disposition >= rules.wary_min:
+            candidate = "wary"
+        elif disposition >= rules.hostile_min:
+            candidate = "hostile"
+        elif disposition <= rules.war_max and recent_aggression:
+            candidate = "war"
+        else:
+            candidate = "hostile"
+
+        stance_order = ("war", "hostile", "wary", "neutral", "friendly", "allied")
+        if current_stance not in stance_order or current_stance == candidate:
+            return candidate
+
+        current_index = stance_order.index(current_stance)
+        candidate_index = stance_order.index(candidate)
+        if abs(candidate_index - current_index) == 1:
+            boundaries = (
+                rules.war_max,
+                rules.wary_min,
+                rules.neutral_min,
+                rules.friendly_min,
+                rules.allied_min,
+            )
+            boundary = boundaries[min(current_index, candidate_index)]
+            margin = rules.hysteresis_margin
+            if candidate_index > current_index and disposition < boundary + margin:
+                candidate = current_stance
+            elif candidate_index < current_index and disposition > boundary - margin:
+                candidate = current_stance
+
+        if candidate == "war" and not recent_aggression:
+            return "hostile"
+        return candidate
+
+    @staticmethod
+    def _has_recent_pair_aggression(
+        first: dict[str, Any],
+        second: dict[str, Any],
+        *,
+        current_day: int,
+        window_days: int,
+    ) -> bool:
+        first_id = str(first.get("id", ""))
+        second_id = str(second.get("id", ""))
+        for faction, target_id in ((first, second_id), (second, first_id)):
+            history = faction.get("lastAggressionByFaction", {})
+            if not isinstance(history, dict):
+                continue
+            day = history.get(target_id)
+            if isinstance(day, int) and 0 <= current_day - day <= window_days:
+                return True
+        return False
+
+    def _update_faction_stances(
+        self,
+        world: WorldState,
+        event_queue: WorldEventQueue | None = None,
+    ) -> None:
+        faction_rules = load_world_content().faction_rules
+        stance_rules = faction_rules.stances
+        factions = sorted(
+            (item for item in world.factions if isinstance(item, dict)),
+            key=lambda item: str(item.get("id", "")),
+        )
+        for faction in factions:
+            self._normalize_faction(faction)
+        for index, first in enumerate(factions):
+            first_id = str(first.get("id", ""))
+            first_relationships = first.get("relationships", {})
+            if not isinstance(first_relationships, dict):
+                first_relationships = {}
+                first["relationships"] = first_relationships
+            first_stances = first.get("stances", {})
+            if not isinstance(first_stances, dict):
+                first_stances = {}
+                first["stances"] = first_stances
+            for second in factions[index + 1:]:
+                second_id = str(second.get("id", ""))
+                second_relationships = second.get("relationships", {})
+                if not isinstance(second_relationships, dict):
+                    second_relationships = {}
+                    second["relationships"] = second_relationships
+                second_stances = second.get("stances", {})
+                if not isinstance(second_stances, dict):
+                    second_stances = {}
+                    second["stances"] = second_stances
+
+                try:
+                    first_disposition = max(
+                        -100,
+                        min(100, int(first_relationships.get(second_id, 0))),
+                    )
+                    second_disposition = max(
+                        -100,
+                        min(100, int(second_relationships.get(first_id, 0))),
+                    )
+                except (TypeError, ValueError):
+                    first_disposition = second_disposition = 0
+                pair_disposition = int((first_disposition + second_disposition) / 2)
+                recent_aggression = self._has_recent_pair_aggression(
+                    first,
+                    second,
+                    current_day=world.currentDay,
+                    window_days=stance_rules.war_requires_aggression_days,
+                )
+                previous_first = first_stances.get(second_id)
+                previous_second = second_stances.get(first_id)
+                current_stance = (
+                    previous_first
+                    if previous_first == previous_second
+                    else None
+                )
+                stance = self._derive_faction_stance(
+                    pair_disposition,
+                    current_stance,
+                    recent_aggression,
+                )
+                if previous_first == stance and previous_second == stance:
+                    continue
+
+                first_stances[second_id] = stance
+                second_stances[first_id] = stance
+                first_name = str(first.get("name", first_id))
+                second_name = str(second.get("name", second_id))
+                summary = (
+                    f"{first_name} and {second_name} shifted their relationship "
+                    f"to {stance}."
+                )
+                reasons = [
+                    "The monthly stance was derived from the pair's current dispositions."
+                ]
+                if stance == "war":
+                    reasons.append(
+                        "A recent attack or raid satisfied the configured war requirement."
+                    )
+                event = {
+                    "type": "faction_stance_change",
+                    "day": world.currentDay,
+                    "actors": [first_id, second_id],
+                    "factionIds": [first_id, second_id],
+                    "previousStances": {
+                        first_id: previous_first,
+                        second_id: previous_second,
+                    },
+                    "stance": stance,
+                    "dispositions": {
+                        first_id: first_disposition,
+                        second_id: second_disposition,
+                    },
+                    "reasons": reasons,
+                }
+                world.internalEvents.append(copy.deepcopy(event))
+                if faction_rules.surface_faction_events_to_active_events:
+                    world.activeEvents.append({
+                        "type": "faction_action",
+                        "action": "faction_stance_change",
+                        "day": world.currentDay,
+                        "factionId": first_id,
+                        "target": {"factionId": second_id},
+                        "summary": summary,
+                    })
+                if event_queue is not None:
+                    event_queue.add(
+                        WorldEvent(
+                            day=world.currentDay,
+                            summary=summary,
+                            event_type="faction_stance_change",
+                            payload=copy.deepcopy(event),
+                        )
+                    )
 
     def _choose_faction_action(self, world: WorldState, faction: dict[str, Any], hours: int) -> str:
         scores = self._faction_action_scores(world, faction, hours)
@@ -1547,6 +1738,16 @@ class WorldTick:
             resources["food"] = max(0, food - 1)
             summary = f"{faction.get('name', 'Faction')} adjusted operations to survive the week."
 
+        if action in {"attack", "raid_settlements"} and target is not None:
+            target_id = str(target.get("id", ""))
+            faction_id = str(faction.get("id", ""))
+            if target_id and target_id != faction_id:
+                self._record_faction_aggression(
+                    world,
+                    faction_id,
+                    target_id,
+                )
+
         if summary and event_queue is not None:
             event_queue.add(WorldEvent(day=world.currentDay, summary=summary, event_type="faction_action"))
 
@@ -1560,6 +1761,28 @@ class WorldTick:
     def _first_other_faction_id(self, world: WorldState, faction: dict[str, Any]) -> str | None:
         target = self._select_target_faction(world, faction)
         return target.get("id") if target is not None else None
+
+    @staticmethod
+    def _record_faction_aggression(
+        world: WorldState,
+        aggressor_id: str,
+        target_id: str,
+    ) -> None:
+        for faction in world.factions:
+            if not isinstance(faction, dict):
+                continue
+            faction_id = str(faction.get("id", ""))
+            counterpart_id = (
+                target_id if faction_id == aggressor_id else
+                aggressor_id if faction_id == target_id else None
+            )
+            if counterpart_id is None:
+                continue
+            history = faction.get("lastAggressionByFaction", {})
+            if not isinstance(history, dict):
+                history = {}
+                faction["lastAggressionByFaction"] = history
+            history[counterpart_id] = world.currentDay
 
     def _update_relationship(self, world: WorldState, source_id: str, target_id: str, delta: int) -> None:
         source = next((item for item in world.factions if isinstance(item, dict) and item.get("id") == source_id), None)

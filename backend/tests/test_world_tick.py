@@ -1198,6 +1198,93 @@ def test_world_tick_defers_faction_decisions_to_weekly_ticks():
         assert -100 <= score <= 100
 
 
+@pytest.mark.parametrize(
+    ("disposition", "recent_aggression", "expected"),
+    [
+        (60, False, "allied"),
+        (20, False, "friendly"),
+        (-19, False, "neutral"),
+        (-49, False, "wary"),
+        (-79, False, "hostile"),
+        (-80, False, "hostile"),
+        (-80, True, "war"),
+    ],
+)
+def test_faction_stance_threshold_boundaries(
+    disposition,
+    recent_aggression,
+    expected,
+):
+    tick = WorldTick(seed=17)
+
+    assert tick._derive_faction_stance(
+        disposition,
+        None,
+        recent_aggression,
+    ) == expected
+
+
+def test_faction_stance_hysteresis_delays_adjacent_transitions():
+    tick = WorldTick(seed=17)
+
+    assert tick._derive_faction_stance(16, "friendly", False) == "friendly"
+    assert tick._derive_faction_stance(14, "friendly", False) == "neutral"
+    assert tick._derive_faction_stance(24, "neutral", False) == "neutral"
+    assert tick._derive_faction_stance(25, "neutral", False) == "friendly"
+
+
+def _stance_test_world(current_day, disposition=-90, aggression_day=None):
+    aggression_history = (
+        {"faction_b": aggression_day} if aggression_day is not None else {}
+    )
+    return WorldState.from_dict({
+        "currentDay": current_day,
+        "factions": [
+            {
+                "id": "faction_a",
+                "name": "Faction A",
+                "relationships": {"faction_b": disposition},
+                "lastAggressionByFaction": copy.deepcopy(aggression_history),
+            },
+            {
+                "id": "faction_b",
+                "name": "Faction B",
+                "relationships": {"faction_a": disposition},
+            },
+        ],
+        "activeEvents": [],
+        "internalEvents": [],
+    })
+
+
+def test_faction_stance_war_requires_recent_aggression_and_updates_both_records():
+    tick = WorldTick(seed=17)
+    peaceful_world = _stance_test_world(current_day=30)
+    tick._update_faction_stances(peaceful_world)
+    assert peaceful_world.factions[0]["stances"]["faction_b"] == "hostile"
+    assert peaceful_world.factions[1]["stances"]["faction_a"] == "hostile"
+
+    aggressive_world = _stance_test_world(current_day=30, aggression_day=25)
+    queue = WorldEventQueue()
+    tick._update_faction_stances(aggressive_world, queue)
+    assert aggressive_world.factions[0]["stances"]["faction_b"] == "war"
+    assert aggressive_world.factions[1]["stances"]["faction_a"] == "war"
+    assert aggressive_world.internalEvents[0]["type"] == "faction_stance_change"
+    assert aggressive_world.activeEvents[0]["action"] == "faction_stance_change"
+    assert queue.has_pending_events()
+
+
+def test_monthly_faction_stance_updates_are_deterministic():
+    first = _stance_test_world(current_day=30, disposition=25)
+    second = _stance_test_world(current_day=30, disposition=25)
+    tick = WorldTick(seed=17)
+
+    tick._simulate_factions(first, hours=24)
+    tick._simulate_factions(second, hours=24)
+
+    assert first.to_dict() == second.to_dict()
+
+
 def test_world_tick_generates_faction_summary_events_for_world_context():
     world_state = WorldState.from_dict(
         {

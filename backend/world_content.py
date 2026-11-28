@@ -188,6 +188,31 @@ class FactionDecisionRules(StrictContentModel):
     goal_action_targets: dict[str, str] = Field(default_factory=dict)
 
 
+class FactionStanceRules(StrictContentModel):
+    monthly_interval_days: StrictInt = Field(gt=0)
+    allied_min: StrictInt = Field(ge=-100, le=100)
+    friendly_min: StrictInt = Field(ge=-100, le=100)
+    neutral_min: StrictInt = Field(ge=-100, le=100)
+    wary_min: StrictInt = Field(ge=-100, le=100)
+    hostile_min: StrictInt = Field(ge=-100, le=100)
+    war_max: StrictInt = Field(ge=-100, le=100)
+    hysteresis_margin: StrictInt = Field(ge=0)
+    war_requires_aggression_days: StrictInt = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_threshold_order(self) -> FactionStanceRules:
+        if not (
+            self.allied_min
+            > self.friendly_min
+            > self.neutral_min
+            > self.wary_min
+            > self.hostile_min
+            > self.war_max
+        ):
+            raise ValueError("Faction stance thresholds must descend from allied to war.")
+        return self
+
+
 DiscoveryLevel = Literal["heard_of", "met", "known"]
 
 
@@ -229,6 +254,7 @@ class FactionRules(StrictContentModel):
     max_factions: StrictInt = Field(gt=0)
     splinter: SplinterRules
     decisions: FactionDecisionRules
+    stances: FactionStanceRules
     discovery: DiscoveryRules = Field(default_factory=DiscoveryRules)
     threads: WorldThreadRules = Field(
         default_factory=lambda: WorldThreadRules(

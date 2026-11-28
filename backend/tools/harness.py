@@ -1308,6 +1308,37 @@ def run_world_sim_scenarios(
     }
 
 
+def _aggregate_stance_distributions(
+    runs: list[dict[str, Any]],
+    *,
+    days: int,
+) -> tuple[dict[int, dict[str, int]], bool]:
+    distributions: dict[int, dict[str, int]] = {}
+    for checkpoint_day in (30, 60, 100):
+        if checkpoint_day > days:
+            continue
+        stance_counts = {stance: 0 for stance in FACTION_STANCES}
+        for run in runs:
+            snapshot = next(
+                (
+                    item for item in run["daily"]
+                    if item.get("elapsed_day") == checkpoint_day
+                ),
+                None,
+            )
+            if snapshot is None:
+                continue
+            for stance, count in snapshot["stance_distribution"].items():
+                stance_counts[stance] += count
+        distributions[checkpoint_day] = stance_counts
+
+    changed = len({
+        tuple(distribution[stance] for stance in FACTION_STANCES)
+        for distribution in distributions.values()
+    }) > 1
+    return distributions, changed
+
+
 def _world_sim_acceptance_rows(
     scenarios: dict[str, dict[str, Any]],
     *,
@@ -1398,22 +1429,11 @@ def _world_sim_acceptance_rows(
             "PASS" if early_collapse_rate <= 0.10 else "WARN",
         )
 
-        for checkpoint_day in (30, 60, 100):
-            if checkpoint_day > days:
-                continue
-            stance_counts = {stance: 0 for stance in FACTION_STANCES}
-            for run in runs:
-                snapshot = next(
-                    (
-                        item for item in run["daily"]
-                        if item.get("elapsed_day") == checkpoint_day
-                    ),
-                    None,
-                )
-                if snapshot is None:
-                    continue
-                for stance, count in snapshot["stance_distribution"].items():
-                    stance_counts[stance] += count
+        stance_distributions, stance_changed = _aggregate_stance_distributions(
+            runs,
+            days=days,
+        )
+        for checkpoint_day, stance_counts in stance_distributions.items():
             active_stances = sum(count > 0 for count in stance_counts.values())
             stance_display = ", ".join(
                 f"{stance}={stance_counts[stance]}"
@@ -1422,9 +1442,10 @@ def _world_sim_acceptance_rows(
             add_row(
                 scenario,
                 f"Faction stances at day {checkpoint_day}",
-                f"{stance_display}; distinct={active_stances}",
-                "More than one stance represented",
-                "PASS" if active_stances > 1 else "WARN",
+                f"{stance_display}; distinct={active_stances}; "
+                f"changed across checkpoints={'yes' if stance_changed else 'no'}",
+                "Stance distributions change between days 30, 60, and 100",
+                "PASS" if stance_changed else "WARN",
             )
 
         bound_totals = {
